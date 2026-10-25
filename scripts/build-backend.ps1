@@ -48,6 +48,8 @@ uv run python -m PyInstaller `
   --hidden-import pydantic_settings `
   --hidden-import psutil `
   --hidden-import yaml `
+  --hidden-import tzdata `
+  --collect-data tzdata `
   --collect-all browser_use `
   --collect-all playwright `
   --hidden-import pdfminer.high_level `

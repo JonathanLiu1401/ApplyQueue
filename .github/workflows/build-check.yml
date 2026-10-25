@@ -95,5 +95,12 @@ jobs:
       - name: Build backend sidecar (Windows)
         if: runner.os == 'Windows'
         run: powershell -ExecutionPolicy Bypass -File scripts/build-backend.ps1
+      - name: Sidecar self-test (frozen binary, bundled tz database)
+        shell: bash
+        run: |
+          for b in src-tauri/binaries/applyqueue-backend-${{ matrix.target }}*; do
+            "$b" --self-test | tee self-test.json
+            grep -q '"tzdb": true' self-test.json
+          done
       - name: Compile Tauri app (no bundle, unsigned)
         run: npx tauri build --no-bundle --target ${{ matrix.target }}

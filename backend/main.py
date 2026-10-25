@@ -3101,7 +3101,11 @@ if __name__ == "__main__":
 
         from core.mcp_server import tool_names as _mcp_tool_names
 
-        print(json.dumps({**_pdf_self_test(), "mcp_tools": len(_mcp_tool_names())}), flush=True)
+        from zoneinfo import ZoneInfo as _ZoneInfo
+
+        # Schedules use IANA zones; Windows has no system tz database, so tzdata must be bundled.
+        _tz_ok = _ZoneInfo("America/Los_Angeles").key == "America/Los_Angeles"
+        print(json.dumps({**_pdf_self_test(), "mcp_tools": len(_mcp_tool_names()), "tzdb": _tz_ok}), flush=True)
         sys.exit(0)
 
     def _handle_sigterm(signum, frame):

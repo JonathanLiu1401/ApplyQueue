@@ -272,6 +272,43 @@ M1 checklist (updated with each M1 commit):
   (`<data>/vault/site_credentials.json`); the old shared password is only a sign-in fallback.
   Sync repo storage comes in M5.
 
+### 5.2 M3 status (subscription CLI backends)
+- [x] MCP server (`applyqueue-backend --mcp-server`, stdio JSON-RPC, schema-validated): `next_job`,
+  `skip_job`, `finish_job`, `get_candidate_context`, `browser_*` (navigate/snapshot/click/type/
+  select/press/upload_resume/wait/tabs/screenshot/network_errors), `form_scan/autofill/fill/
+  answer_for/submit`, `report_needs_human`, `fill_secret` (the CLI never sees the password),
+  `email_get_otp`, `email_find_confirmation`. `finish_job` re-checks the page itself (#89 rules).
+- [x] Adapters (`backend/core/cli_backends/`): Grok Build (ACP over stdio; `grok models` as the
+  login check), Cursor (`agent -p --output-format stream-json`, workspace `.cursor/mcp.json` +
+  deny Shell/Write), Codex (`codex exec --json`, MCP via `-c` overrides; ChatGPT sign-in allowed,
+  token stays in Codex's own store), Claude Code (opt-in after a terms acknowledgement, unmodified
+  CLI, user's own login, `--strict-mcp-config`), Gemini = API key only (not runnable as a CLI).
+  We run the vendor's binary and never read, copy, or proxy its token files.
+- [x] Detection: install path / custom path, version, login state; fixed-shape outcomes
+  (`ok`, `auth_needed`, `rate_limited`, `crash`, `timeout`, `cancelled`, …); stop-the-queue on
+  auth/rate-limit; process-tree kill on timeout/cancel.
+- [x] `token_guard`: sync-repo writes reject Codex/ChatGPT/Claude/Google/Microsoft token shapes and
+  token files (`auth.json`, `email_tokens.json`, …).
+- [x] Settings → "Agent backend" cards (install/login state, login command, path override, Claude
+  terms dialog, Grok Bot setup prompt with no secrets). `/apply/start` routes to the selected CLI.
+- [x] Tests: fake CLI binaries per vendor (stream output, auth-needed, crash, timeout, ACP), MCP
+  protocol tests, API tests, token-guard tests, UI tests.
+
+### 5.3 M4 status (Gmail + Outlook)
+- [x] OAuth with the user's own client (Google "Desktop app" client + secret; Microsoft public
+  client, PKCE, no secret), loopback redirect, one-time state, 15-min TTL. Tokens for email only, in
+  `<data>/vault/email_accounts.json` (0600). Google Testing-mode apps: "Reconnect" prompt from
+  day 6 and on `invalid_grant`/401.
+- [x] Gmail API / Graph: confirmation detection → `confirm_by_email` (needs page evidence first)
+  → label/category (`ApplyQueue/Applied`, configurable) + archive; verification/security-code mail
+  for an application we are running → `ApplyQueue/Verification` + archive. Only mail matched to a
+  job we applied to is modified; bodies are not stored. Background sweep every N minutes.
+- [x] OTP via API: `get_email_code` (browser-use) / `email_get_otp` (MCP) replace mail.google.com
+  browsing when a mailbox is linked; used codes are not handed out twice in a run.
+- [x] Mock OAuth/Gmail/Graph server (`tests/fixtures/mock_mail_server.py`) + API/UI tests.
+- [ ] Rejection/interview labels and recruiter drafts: deferred (not in this milestone's brief).
+- Setup notes: `docs/applyqueue/EMAIL_SETUP.md`.
+
 ## 6. Guardrails (unchanged)
 Private repo only; no GitHub fork; no upstream PRs, publishing, domains, or npm names without
 Art's approval; no Cursor cloud agents; no secrets or personal data in the repo. Fixtures use

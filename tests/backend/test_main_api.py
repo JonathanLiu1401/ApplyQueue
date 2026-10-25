@@ -774,3 +774,70 @@ class TestVaultSites:
         again = auth_client.get("/settings").json()
         assert "password" not in again.get("sensitive_data", {})
         assert auth_client.get("/vault/sites").json()["legacy_shared_password"] is True
+
+
+class TestAgentBackends:
+    """M3: subscription CLI backend cards (detection is local; nothing is installed in the tmp HOME)."""
+
+    def test_lists_all_backends(self, auth_client, monkeypatch):
+        monkeypatch.setenv("PATH", "/nonexistent")
+        body = auth_client.get("/agents/backends").json()
+        assert body["selected"] == "browser_use"
+        rows = {b["id"]: b for b in body["backends"]}
+        assert list(rows) == ["grok", "cursor", "codex", "claude", "gemini"]
+        assert rows["gemini"]["runnable"] is False and rows["claude"]["requires_terms"] is True
+        assert all(r["installed"] is False for r in rows.values())
+
+    def test_claude_needs_terms_and_revoking_unselects(self, auth_client):
+        assert auth_client.put("/agents/backends/claude", json={"select": True}).status_code == 400
+        assert auth_client.put("/agents/backends/gemini", json={"select": True}).status_code == 400
+        assert auth_client.put("/agents/backends/nope", json={}).status_code == 404
+        ok = auth_client.put("/agents/backends/claude", json={"accept_terms": True, "select": True}).json()
+        assert ok["selected"] == "cli:claude" and ok["config"]["terms_accepted_at"]
+        # A stale Settings form cannot change the backend behind the user's back.
+        settings = auth_client.get("/settings").json()
+        settings["agent_backend"] = "browser_use"
+        auth_client.put("/settings", json=settings)
+        assert auth_client.get("/settings").json()["agent_backend"] == "cli:claude"
+        off = auth_client.put("/agents/backends/claude", json={"accept_terms": False}).json()
+        assert off["selected"] == "browser_use"
+        assert auth_client.put("/agents/selected", json={"backend": "cli:codex"}).json()["selected"] == "cli:codex"
+        assert auth_client.put("/agents/selected", json={"backend": "browser_use"}).json()["selected"] == "browser_use"
+
+    def test_bad_custom_path_rejected(self, auth_client):
+        assert auth_client.put("/agents/backends/codex", json={"path": "/no/such/codex"}).status_code == 400
+
+    def test_setup_prompt_has_no_secrets(self, auth_client):
+        prompt = auth_client.get("/agents/setup-prompt").json()["prompt"]
+        assert "ApplyQueue" in prompt and TOKEN not in prompt and "Bearer" not in prompt
+
+
+class TestEmailApi:
+    """M4 endpoints. The OAuth callback is reachable without the bearer token but needs our one-time state."""
+
+    def test_status_never_returns_secrets(self, auth_client):
+        r = auth_client.put("/email/gmail/config", json={"client_id": "client-1.apps.example.com",
+                                                          "client_secret": "desktop-secret-x"})
+        assert r.status_code == 200
+        body = auth_client.get("/email/status").json()
+        assert body["providers"]["gmail"]["configured"] and not body["providers"]["gmail"]["linked"]
+        assert "desktop-secret-x" not in str(body)
+        assert body["settings"]["confirm_label"] == "ApplyQueue/Applied"
+
+    def test_connect_url_and_forged_callback(self, auth_client):
+        assert auth_client.post("/email/outlook/connect").status_code == 400  # no client yet
+        auth_client.put("/email/outlook/config", json={"client_id": "00000000-0000-0000-0000-00000000abcd"})
+        url = auth_client.post("/email/outlook/connect").json()["url"]
+        assert "code_challenge=" in url and "state=" in url
+        anon = TestClient(main.app)
+        r = anon.get("/email/oauth/callback", params={"state": "forged", "code": "x"})
+        assert r.status_code == 400 and "expired" in r.text
+        assert anon.get("/email/status").status_code == 401
+        assert auth_client.put("/email/nope/config", json={"client_id": "x"}).status_code == 404
+
+    def test_settings_roundtrip_and_sweep_needs_link(self, auth_client):
+        r = auth_client.put("/email/settings", json={"confirm_label": "  Job   Hunt ", "sweep_minutes": 1,
+                                                      "archive_confirmations": False}).json()
+        assert r["settings"]["confirm_label"] == "Job Hunt" and r["settings"]["sweep_minutes"] == 2
+        assert auth_client.get("/email/settings").json()["archive_confirmations"] is False
+        assert auth_client.post("/email/sweep").status_code == 400

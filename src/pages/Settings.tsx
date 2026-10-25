@@ -11,6 +11,8 @@ import TagInput from "../components/ui/TagInput";
 import type { PluginConfig } from "../lib/types";
 import { LANGUAGE_NAMES, getSavedLanguage, saveLanguagePreference } from "../i18n/languageDetection";
 import { loadLanguage } from "../i18n";
+import AgentBackendsSection from "../components/settings/AgentBackendsSection";
+import EmailAccountsSection from "../components/settings/EmailAccountsSection";
 
 export default function SettingsPage() {
   const later = useSafeTimeout();
@@ -238,6 +240,10 @@ export default function SettingsPage() {
           </p>
         </div>
       </Section>
+
+      <AgentBackendsSection />
+
+      <EmailAccountsSection />
 
       {/* Privacy & Telemetry */}
       <Section title="Privacy & Telemetry">

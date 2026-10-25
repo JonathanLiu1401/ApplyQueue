@@ -187,30 +187,47 @@ async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[
     ledger = RunLedger()
     apply_tools = build_apply_tools(
         ledger=ledger, profile=profile, qa=qa,
-        context={"source": "LinkedIn", "company": company, "title": title},
+        context={"source": "LinkedIn", "company": company, "title": title, "url": url},
         vault=vault, account_email=agent_sensitive_data["account_email"],
         sensitive_data=agent_sensitive_data,
     )
+
+    try:
+        from core.mail.service import has_linked_account as _mail_linked
+        mail_linked = _mail_linked()
+    except Exception:
+        mail_linked = False
 
     login_preamble = (
         f"FIRST — LOGIN CHECK:\n"
         f"1. Go to https://www.linkedin.com/feed/ to check if you're logged into LinkedIn.\n"
         f"   - If you see the feed/home page → logged in ✓\n"
         f"   - If you see a login page → WAIT for user to log in manually. Check every 15 seconds (refresh). Wait up to 5 minutes.\n"
-        f"2. Open a new tab and go to https://mail.google.com/mail/u/0/#inbox to check Gmail.\n"
-        f"   - If you see the Gmail inbox (list of emails) → logged in ✓\n"
-        f"   - If you see a Google sign-in page or redirect → WAIT for user to log in manually. Check every 15 seconds. Wait up to 5 minutes.\n"
-        f"3. Close the Gmail tab and switch back to LinkedIn.\n\n"
     )
-
-    otp_instructions = (
-        "\n\nOTP/VERIFICATION CODES: If ANY site asks for a verification code, OTP, or 2FA token:\n"
-        "1. Choose the EMAIL option if given a choice\n"
-        "2. Open a new tab and go to https://mail.google.com\n"
-        "3. Find the most recent email with the verification/OTP code\n"
-        "4. Copy the code, switch back to the application tab, and enter it\n"
-        "5. This is NOT a blocker — always attempt to retrieve the code from Gmail before giving up"
-    )
+    if mail_linked:
+        login_preamble += "\n"
+        otp_instructions = (
+            "\n\nOTP/VERIFICATION CODES: If ANY site asks for a verification code, OTP, or 2FA token:\n"
+            "1. Choose the EMAIL option if given a choice\n"
+            "2. Call get_email_code (it reads the linked mailbox through its API and waits for the email)\n"
+            "3. Enter the code (or open the verify link it returns) in the application tab\n"
+            "4. NEVER open webmail (mail.google.com, outlook.com) in the browser"
+        )
+    else:
+        login_preamble += (
+            f"2. Open a new tab and go to https://mail.google.com/mail/u/0/#inbox to check Gmail.\n"
+            f"   - If you see the Gmail inbox (list of emails) → logged in ✓\n"
+            f"   - If you see a Google sign-in page or redirect → WAIT for user to log in manually. Check every 15 seconds. Wait up to 5 minutes.\n"
+            f"3. Close the Gmail tab and switch back to LinkedIn.\n\n"
+        )
+        otp_instructions = (
+            "\n\nOTP/VERIFICATION CODES: If ANY site asks for a verification code, OTP, or 2FA token:\n"
+            "1. Choose the EMAIL option if given a choice\n"
+            "2. Open a new tab and go to https://mail.google.com\n"
+            "3. Find the most recent email with the verification/OTP code\n"
+            "4. Copy the code, switch back to the application tab, and enter it\n"
+            "5. This is NOT a blocker — always attempt to retrieve the code from Gmail before giving up"
+        )
 
     if easy_apply:
         apply_instructions = (

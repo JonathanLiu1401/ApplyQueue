@@ -43,6 +43,16 @@ vi.mock("../i18n", () => ({
 }));
 
 vi.mock("../lib/api", () => ({
+  getAgentBackends: vi.fn(async () => ({ selected: "browser_use", backends: [] })),
+  updateAgentBackend: vi.fn(),
+  selectAgentBackend: vi.fn(),
+  getAgentSetupPrompt: vi.fn(async () => ({ prompt: "" })),
+  getEmailStatus: vi.fn(async () => ({ providers: {}, settings: null, last_sweep: { at: null, summary: null } })),
+  saveEmailClient: vi.fn(),
+  connectEmail: vi.fn(),
+  disconnectEmail: vi.fn(),
+  saveEmailSettings: vi.fn(),
+  sweepEmail: vi.fn(),
   getSettings: vi.fn(),
   saveSettings: vi.fn(),
   getPlugins: vi.fn(),

@@ -5,6 +5,7 @@ No hardcoded values.
 """
 import json
 import logging
+import os
 import platform
 import shutil
 from pathlib import Path
@@ -79,6 +80,11 @@ _migration_checked = False
 def get_data_dir() -> Path:
     """Get OS-appropriate data directory for the app (migrating LangHire's once)."""
     global _migration_checked
+    override = os.environ.get("APPLYQUEUE_DATA_DIR", "").strip()
+    if override:  # set for the MCP server child process (and tests)
+        base = Path(override).expanduser()
+        base.mkdir(parents=True, exist_ok=True)
+        return base
     root = _os_data_root()
     if not _migration_checked:
         _migration_checked = True

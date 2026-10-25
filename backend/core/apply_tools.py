@@ -5,6 +5,7 @@
 - report_needs_human: the ledger entry used instead of leaving a field blank.
 - report_confirmation: reads the page ITSELF (never the agent's claim).
 - fill_site_password: types a per-site vault password without the LLM seeing it.
+- get_email_code: reads a verification code from the linked mailbox API (M4), no webmail browsing.
 """
 
 import asyncio
@@ -36,6 +37,7 @@ class RunLedger:
     unanswered_last: list[dict] = field(default_factory=list)
     blocked_submits: int = 0
     passwords: list[dict] = field(default_factory=list)  # {host, mode, created} - never the password
+    otp_message_ids: list[str] = field(default_factory=list)
 
     def add_needs_human(self, label: str, reason: str) -> None:
         if not any(e["field_label"] == label for e in self.needs_human):
@@ -198,5 +200,29 @@ def build_apply_tools(*, ledger: RunLedger, profile: dict, qa: dict, context: di
         ledger.passwords.append({"host": host, "mode": params.mode, "created": created})
         return ActionResult(extracted_content=f"Typed the {'new' if created else 'saved'} password for {host} "
                                               f"into element {params.index}.")
+
+    class EmailCodeParams(BaseModel):
+        sender_hint: str = PField(default="", description="Company or site name that sent the code")
+        wait_seconds: int = PField(default=90, ge=0, le=300)
+
+    @tools.action("Get the newest verification / one-time code (or verify link) from the user's linked mailbox "
+                  "through the Gmail/Outlook API. Never open webmail.", param_model=EmailCodeParams)
+    async def get_email_code(params: EmailCodeParams) -> ActionResult:
+        try:
+            from core.mail import service as mail
+        except ImportError:  # pragma: no cover
+            from backend.core.mail import service as mail
+        if not mail.has_linked_account():
+            return ActionResult(error="No mailbox is linked in ApplyQueue. Use report_needs_human for the code.")
+        ctx = context or {}
+        got = await asyncio.to_thread(mail.get_otp, hint=params.sender_hint or ctx.get("company", ""),
+                                      since_minutes=15, wait_seconds=params.wait_seconds,
+                                      job_url=ctx.get("url", ""), exclude_ids=list(ledger.otp_message_ids))
+        if not got:
+            return ActionResult(error="No verification email arrived yet. Request a new code, then call again.")
+        ledger.otp_message_ids.append(got["message_id"])
+        if got.get("code"):
+            return ActionResult(extracted_content=f"Verification code: {got['code']}")
+        return ActionResult(extracted_content=f"No code in the email; open this verification link: {got['link']}")
 
     return tools

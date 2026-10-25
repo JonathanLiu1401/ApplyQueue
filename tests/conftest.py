@@ -38,3 +38,22 @@ def data_dir(tmp_path, monkeypatch):
     # Return the resolved data dir so tests can assert on files directly.
     import core.config as config
     return config.get_data_dir()
+
+
+@pytest.fixture
+def aq_data_dir(tmp_path, monkeypatch):
+    """An isolated ApplyQueue data dir shared with child processes (MCP server, fake CLIs).
+
+    Child processes find it through APPLYQUEUE_DATA_DIR; in this process the
+    jobs.json paths of an already-imported core.shared_config are pointed at it too.
+    """
+    d = tmp_path / "aqdata"
+    d.mkdir()
+    monkeypatch.setenv("APPLYQUEUE_DATA_DIR", str(d))
+    monkeypatch.setenv("APPLYQUEUE_MCP_HEADLESS", "1")
+    for name in ("core.shared_config", "backend.core.shared_config"):
+        mod = sys.modules.get(name)
+        if mod is not None and hasattr(mod, "JOBS_FILE"):
+            monkeypatch.setattr(mod, "JOBS_FILE", d / "jobs.json")
+            monkeypatch.setattr(mod, "JOBS_LOCK", d / "jobs.json.lock")
+    return d

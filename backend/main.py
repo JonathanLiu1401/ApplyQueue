@@ -14,7 +14,15 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, Query
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--mcp-server":
+    # M3: the ApplyQueue MCP server a subscription CLI (Grok/Cursor/Codex/Claude)
+    # starts for one run. Dispatched before the web app is imported so it never
+    # writes the API token, opens backend.log or binds a port.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from core import mcp_server as _mcp_server
+    sys.exit(_mcp_server.main(sys.argv[2:]))
+
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -58,7 +66,9 @@ async def lifespan(app: FastAPI):
     _ensure_chromium_async()
     # Start parent-process watchdog (self-terminate if Tauri app dies)
     _start_parent_watchdog()
+    _start_mail_sweeper()
     yield
+    _mail_stop.set()
     # Graceful shutdown: stop running operations
     import traceback
     _log.info(f"Backend shutting down... (trigger: lifespan exit)")
@@ -145,6 +155,9 @@ class _AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         _log.info(f"REQ {request.method} {request.url.path} origin='{request.headers.get('Origin', '')}' auth={'yes' if request.headers.get('Authorization') else 'no'}")
         if request.url.path in ("/health", "/chromium/status"):
+            return await call_next(request)
+        if request.url.path == "/email/oauth/callback" and request.method == "GET":
+            # Browser redirect from Google/Microsoft: no bearer token; protected by the one-time OAuth state.
             return await call_next(request)
         origin = request.headers.get("Origin", "")
         if origin and origin not in _ALLOWED_ORIGINS:
@@ -579,9 +592,17 @@ async def list_ollama_models(body: dict):
 async def get_settings():
     return load_settings()
 
+# Owned by /agents/* and /email/*: a stale Settings form must not overwrite (or inject) them.
+_MANAGED_SETTINGS = ("agent_backend", "cli_backends", "email")
+
+
 @app.put("/settings")
 async def update_settings(settings: dict):
-    save_settings(settings)
+    current = load_settings()
+    for key in _MANAGED_SETTINGS:
+        settings.pop(key, None)
+    # Partial update: the UI sends only the fields it edits (e.g. {"theme": ...}).
+    save_settings({**current, **settings})
     return {"success": True}
 
 
@@ -986,6 +1007,11 @@ async def start_applying(body: ApplyRequest):
             print("No pending jobs to apply to.")
             return
 
+        backend = (load_settings().get("agent_backend") or "browser_use").strip()
+        if backend.startswith("cli:"):
+            await _apply_with_cli(backend[4:], pending)
+            return
+
         applied_labels = apply_jobs.submitted_labels(jobs)
 
         label = "All" if easy_apply_filter is None else ("Easy Apply" if easy_apply_filter else "Non-Easy Apply")
@@ -1020,6 +1046,231 @@ async def start_applying(body: ApplyRequest):
 
     _apply_thread = _run_async_in_thread(make_coro, _apply_status)
     return {"success": True, "message": f"Started {mode} apply with {workers} worker(s)"}
+
+
+async def _apply_with_cli(backend_id: str, pending: list[dict]) -> None:
+    """M3: apply through a subscription CLI (one CLI process per job, sequential)."""
+    from core.cli_backends import runner as cli_runner
+
+    settings = load_settings()
+    print(f"Applying to {len(pending)} job(s) with the {backend_id} CLI backend\n")
+    counts: dict[str, int] = {}
+    for job in pending:
+        if _apply_status.get("cancel_requested"):
+            break
+        res = await cli_runner.run_job(backend_id, job, settings=settings, data_dir=get_data_dir(), log=print,
+                                       cancel=lambda: bool(_apply_status.get("cancel_requested")))
+        key = res.get("status") or res["outcome"]
+        counts[key] = counts.get(key, 0) + 1
+        if res["outcome"] in cli_runner.STOP_OUTCOMES:
+            print(f"⏸ Stopped: {res['message']}")
+            with _status_lock:
+                _apply_status["error"] = res["message"]
+            break
+    print(f"\nResults: {counts}")
+
+
+# ── Agent backends (M3) ───────────────────────────────────────────────────
+@app.get("/agents/backends")
+async def get_agent_backends():
+    from core.cli_backends import list_backends
+
+    settings = load_settings()
+    rows = await asyncio.to_thread(list_backends, settings)
+    return {"selected": settings.get("agent_backend") or "browser_use", "backends": rows}
+
+
+@app.put("/agents/backends/{backend_id}")
+async def update_agent_backend(backend_id: str, body: dict):
+    from core.cli_backends import SPECS
+
+    spec = SPECS.get(backend_id)
+    if not spec:
+        return JSONResponse(status_code=404, content={"success": False, "error": "unknown backend"})
+    settings = load_settings()
+    cfgs = settings.setdefault("cli_backends", {})
+    cfg = cfgs.setdefault(backend_id, {})
+    if "enabled" in body:
+        cfg["enabled"] = bool(body["enabled"])
+    if "path" in body:
+        path = str(body.get("path") or "").strip()
+        if path and not Path(path).expanduser().is_file():
+            return JSONResponse(status_code=400, content={"success": False, "error": "path is not a file"})
+        cfg["path"] = path
+    if "accept_terms" in body and spec.requires_terms:
+        if body["accept_terms"]:
+            cfg["terms_accepted_at"] = _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime())
+        else:
+            cfg.pop("terms_accepted_at", None)
+            cfg["enabled"] = False
+    if body.get("select"):
+        if not spec.runnable:
+            return JSONResponse(status_code=400, content={"success": False,
+                                                          "error": f"{spec.name} is API-key only"})
+        if spec.requires_terms and not cfg.get("terms_accepted_at"):
+            return JSONResponse(status_code=400, content={"success": False, "error": "terms_required"})
+        cfg["enabled"] = True
+        settings["agent_backend"] = f"cli:{backend_id}"
+    elif body.get("select") is False or not cfg.get("enabled") or (
+            spec.requires_terms and not cfg.get("terms_accepted_at")):
+        if settings.get("agent_backend") == f"cli:{backend_id}":
+            settings["agent_backend"] = "browser_use"
+    save_settings(settings)
+    return {"success": True, "selected": settings.get("agent_backend") or "browser_use", "config": cfg}
+
+
+@app.put("/agents/selected")
+async def select_agent_backend(body: dict):
+    backend = str(body.get("backend") or "browser_use")
+    if backend != "browser_use":
+        return await update_agent_backend(backend.removeprefix("cli:"), {"select": True})
+    settings = load_settings()
+    settings["agent_backend"] = "browser_use"
+    save_settings(settings)
+    return {"success": True, "selected": "browser_use"}
+
+
+@app.get("/agents/setup-prompt")
+async def agent_setup_prompt():
+    """Grok Bot setup prompt: static text only, no keys, tokens, emails or paths."""
+    from core.cli_backends import grok_bot_setup_prompt, list_backends
+
+    rows = await asyncio.to_thread(list_backends, load_settings(), False)
+    return {"prompt": grok_bot_setup_prompt(rows)}
+
+
+# ── Linked mailboxes (M4) ─────────────────────────────────────────────────
+_mail_stop = threading.Event()
+_mail_last_sweep: dict = {"at": None, "summary": None}
+
+
+def _mail_modules():
+    from core.mail import oauth as mail_oauth, service as mail_service
+    return mail_oauth, mail_service
+
+
+def _start_mail_sweeper():
+    """Every sweep_minutes: confirm/label/archive application emails (only when a mailbox is linked)."""
+    def _loop():
+        mail_oauth, mail_service = _mail_modules()
+        last = 0.0
+        while not _mail_stop.wait(60):
+            try:
+                cfg = mail_service.get_settings()
+                if not cfg["auto_sweep"] or not mail_service.has_linked_account():
+                    continue
+                if _time.time() - last < cfg["sweep_minutes"] * 60:
+                    continue
+                last = _time.time()
+                summary = mail_service.sweep()
+                _mail_last_sweep.update(at=last, summary=summary)
+                if summary["confirmed"]:
+                    _log.info(f"Email sweep confirmed {len(summary['confirmed'])} application(s)")
+            except Exception as e:  # never kill the sidecar
+                _log.warning(f"Email sweep failed: {type(e).__name__}")
+
+    threading.Thread(target=_loop, name="mail-sweeper", daemon=True).start()
+
+
+def _mail_provider_or_404(provider: str):
+    mail_oauth, _ = _mail_modules()
+    if provider not in mail_oauth.PROVIDERS:
+        return None
+    return mail_oauth
+
+
+@app.get("/email/status")
+async def email_status():
+    mail_oauth, mail_service = _mail_modules()
+    return {"providers": {p: mail_oauth.status(p) for p in mail_oauth.PROVIDERS},
+            "settings": mail_service.get_settings(), "last_sweep": _mail_last_sweep}
+
+
+@app.put("/email/{provider}/config")
+async def email_config(provider: str, body: dict):
+    mail_oauth = _mail_provider_or_404(provider)
+    if not mail_oauth:
+        return JSONResponse(status_code=404, content={"success": False, "error": "unknown provider"})
+    try:
+        st = mail_oauth.set_client(provider, str(body.get("client_id") or ""),
+                                   body.get("client_secret") if "client_secret" in body else None,
+                                   body.get("tenant"), body.get("testing_app"))
+    except mail_oauth.OAuthError as e:
+        return JSONResponse(status_code=400, content={"success": False, "error": str(e)})
+    return {"success": True, "status": st}
+
+
+@app.post("/email/{provider}/connect")
+async def email_connect(provider: str, request: Request):
+    mail_oauth = _mail_provider_or_404(provider)
+    if not mail_oauth:
+        return JSONResponse(status_code=404, content={"success": False, "error": "unknown provider"})
+    try:
+        url = mail_oauth.start_authorization(provider, request.url.port or 80)
+    except mail_oauth.OAuthError as e:
+        return JSONResponse(status_code=400, content={"success": False, "error": str(e)})
+    return {"success": True, "url": url}
+
+
+def _callback_page(title: str, detail: str, status_code: int = 200):
+    from html import escape
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(status_code=status_code, content=(
+        "<!doctype html><meta charset=utf-8><title>ApplyQueue</title>"
+        "<body style='font-family:system-ui;max-width:32rem;margin:4rem auto'>"
+        f"<h2>{escape(title)}</h2><p>{escape(detail)}</p></body>"),
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
+
+@app.get("/email/oauth/callback")
+async def email_oauth_callback(state: str = "", code: str = "", error: str = ""):
+    mail_oauth, _ = _mail_modules()
+    if error or not code:
+        return _callback_page("Not connected", f"The provider returned: {error[:100] or 'no code'}.", 400)
+    try:
+        provider = await asyncio.to_thread(mail_oauth.complete_authorization, state, code)
+    except mail_oauth.OAuthError as e:
+        return _callback_page("Not connected", str(e), 400)
+    return _callback_page(f"{mail_oauth.NAMES[provider]} connected",
+                          "You can close this tab and return to ApplyQueue.")
+
+
+@app.delete("/email/{provider}")
+async def email_disconnect(provider: str):
+    mail_oauth = _mail_provider_or_404(provider)
+    if not mail_oauth:
+        return JSONResponse(status_code=404, content={"success": False, "error": "unknown provider"})
+    await asyncio.to_thread(mail_oauth.disconnect, provider)
+    return {"success": True, "status": mail_oauth.status(provider)}
+
+
+@app.get("/email/settings")
+async def email_get_settings():
+    _, mail_service = _mail_modules()
+    return mail_service.get_settings()
+
+
+@app.put("/email/settings")
+async def email_put_settings(body: dict):
+    _, mail_service = _mail_modules()
+    try:
+        cleaned = mail_service.clean_settings(body)
+    except (TypeError, ValueError):
+        return JSONResponse(status_code=400, content={"success": False, "error": "invalid settings"})
+    settings = load_settings()
+    settings["email"] = cleaned
+    save_settings(settings)
+    return {"success": True, "settings": cleaned}
+
+
+@app.post("/email/sweep")
+async def email_sweep():
+    _, mail_service = _mail_modules()
+    if not mail_service.has_linked_account():
+        return JSONResponse(status_code=400, content={"success": False, "error": "No mailbox is linked"})
+    summary = await asyncio.to_thread(mail_service.sweep)
+    _mail_last_sweep.update(at=_time.time(), summary=summary)
+    return {"success": True, **summary}
 
 
 @app.post("/apply/stop")
@@ -1170,15 +1421,14 @@ async def confirm_job_by_email(body: dict):
     evidence = body.get("evidence") or {}
     if not url or not isinstance(evidence, dict) or not evidence:
         return _api_error("missing_field", "url and evidence are required", 400)
-    jobs = _load_jobs()
-    job = jobs.get(url)
-    if not job:
+    from core.jobs_store import confirm_by_email
+    ok, code = confirm_by_email(url, evidence)
+    if code == "not_found":
         return _api_error("not_found", "Job not found", 404)
-    if not js.can_confirm_by_email(job):
+    if code == "not_submitted":
         return _api_error("not_submitted", "Only a page-confirmed submission can be confirmed by email", 409)
-    from core.shared_config import update_job
-    allowed = {k: str(v)[:300] for k, v in evidence.items() if k in ("message_id", "from_domain", "subject", "received_at")}
-    update_job(url, **js.confirmation_fields(allowed))
+    if not ok:
+        return _api_error("missing_field", "evidence must include message_id, from_domain, subject or received_at", 400)
     return {"success": True, "url": url, "status": js.CONFIRMED}
 
 
@@ -2116,7 +2366,9 @@ if __name__ == "__main__":
         # Packaging smoke test (CI): imports above succeeded; check PDF I/O and arch.
         from core.pdf_io import self_test as _pdf_self_test
 
-        print(json.dumps(_pdf_self_test()), flush=True)
+        from core.mcp_server import tool_names as _mcp_tool_names
+
+        print(json.dumps({**_pdf_self_test(), "mcp_tools": len(_mcp_tool_names())}), flush=True)
         sys.exit(0)
 
     def _handle_sigterm(signum, frame):

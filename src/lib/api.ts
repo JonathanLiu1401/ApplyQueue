@@ -444,3 +444,127 @@ export async function reloadPlugins() {
   return request<{ success: boolean; count: number }>("/plugins/reload", { method: "POST" });
 }
 
+
+// ── Agent backends (M3: subscription CLIs) ─────────────────────────────────
+export interface AgentBackend {
+  id: string;
+  name: string;
+  vendor: string;
+  transport: string;
+  runnable: boolean;
+  requires_terms: boolean;
+  terms_text: string | null;
+  terms_accepted: boolean;
+  enabled: boolean;
+  selected: boolean;
+  installed: boolean;
+  path: string | null;
+  custom_path: string;
+  version: string | null;
+  auth: { state: string; method?: string | null; detail?: string };
+  login_command: string;
+  install_hint: string;
+  docs_url: string;
+  login_methods: string[];
+  notes: string;
+}
+
+export async function getAgentBackends() {
+  return request<{ selected: string; backends: AgentBackend[] }>("/agents/backends");
+}
+
+export async function updateAgentBackend(
+  id: string,
+  body: { enabled?: boolean; path?: string; accept_terms?: boolean; select?: boolean },
+) {
+  return request<{ success: boolean; selected: string }>(`/agents/backends/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function selectAgentBackend(backend: string) {
+  return request<{ success: boolean; selected: string }>("/agents/selected", {
+    method: "PUT",
+    body: JSON.stringify({ backend }),
+  });
+}
+
+export async function getAgentSetupPrompt() {
+  return request<{ prompt: string }>("/agents/setup-prompt");
+}
+
+// ── Linked mailboxes (M4) ─────────────────────────────────────────────────
+export type EmailProvider = "gmail" | "outlook";
+
+export interface EmailProviderStatus {
+  provider: EmailProvider;
+  name: string;
+  configured: boolean;
+  client_id: string;
+  client_secret_set: boolean;
+  tenant: string | null;
+  testing_app: boolean | null;
+  linked: boolean;
+  email: string;
+  authorized_at: number | null;
+  reauth_due_at: number | null;
+  needs_reauth: boolean;
+  reauth_due: boolean;
+  last_error: string;
+  registration_redirect_uri: string;
+  scopes: string[];
+}
+
+export interface EmailSettings {
+  confirm_label: string;
+  verification_label: string;
+  archive_confirmations: boolean;
+  archive_verification: boolean;
+  auto_sweep: boolean;
+  sweep_minutes: number;
+}
+
+export interface EmailSweepSummary {
+  confirmed: string[];
+  labeled: number;
+  verification_archived: number;
+  errors: string[];
+}
+
+export async function getEmailStatus() {
+  return request<{
+    providers: Record<EmailProvider, EmailProviderStatus>;
+    settings: EmailSettings;
+    last_sweep: { at: number | null; summary: EmailSweepSummary | null };
+  }>("/email/status");
+}
+
+export async function saveEmailClient(
+  provider: EmailProvider,
+  body: { client_id: string; client_secret?: string; tenant?: string; testing_app?: boolean },
+) {
+  return request<{ success: boolean; status: EmailProviderStatus }>(`/email/${provider}/config`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function connectEmail(provider: EmailProvider) {
+  return request<{ success: boolean; url: string }>(`/email/${provider}/connect`, { method: "POST" });
+}
+
+export async function disconnectEmail(provider: EmailProvider) {
+  return request<{ success: boolean }>(`/email/${provider}`, { method: "DELETE" });
+}
+
+export async function saveEmailSettings(settings: Partial<EmailSettings>) {
+  return request<{ success: boolean; settings: EmailSettings }>("/email/settings", {
+    method: "PUT",
+    body: JSON.stringify(settings),
+  });
+}
+
+export async function sweepEmail() {
+  return request<{ success: boolean } & EmailSweepSummary>("/email/sweep", { method: "POST" });
+}

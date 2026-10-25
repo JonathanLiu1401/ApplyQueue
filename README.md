@@ -25,10 +25,12 @@ or GGUF models you already downloaded, checks your RAM and GPU, recommends a vis
 fits, and downloads it with one click. Nothing leaves your computer except the job sites
 themselves.
 
-Be realistic: on a gaming GPU an application takes a few minutes; on a CPU-only laptop (Intel
-Macs included) it can take 15-45 minutes, so queue jobs and leave it running overnight. Small
-models make more mistakes, so start in review-first mode. See
-[docs/applyqueue/LOCAL_MODELS.md](docs/applyqueue/LOCAL_MODELS.md).
+Be realistic: on a gaming GPU an application takes a few minutes. On a CPU-only machine (Intel
+Macs included) small models are often too slow to finish at all: in our measured run a 2B vision
+model on 8 CPU cores managed 5 agent steps in 50 minutes and did not submit (it failed safely).
+Small models make more mistakes, so start in review-first mode. See
+[docs/applyqueue/LOCAL_MODELS.md](docs/applyqueue/LOCAL_MODELS.md) and the measured results in
+[docs/applyqueue/TEST_REPORT.md](docs/applyqueue/TEST_REPORT.md).
 
 ## What ApplyQueue adds on top of LangHire
 

@@ -27,8 +27,8 @@ The app measures RAM and GPU memory and picks the largest Qwen3-VL or Gemma 3 mo
 | NVIDIA/AMD GPU, 24 GB | qwen3-vl:30b | 2-6 min |
 | GPU, 12 GB | gemma3:12b | 2-6 min |
 | Apple silicon, 16 GB | gemma3:12b | 4-12 min |
-| CPU only (incl. Intel Mac), 16 GB+ | qwen3-vl:4b or 8b | 15-45 min, run overnight |
-| CPU only, 8 GB | qwen3-vl:2b | 15-45 min, review-first |
+| CPU only (incl. Intel Mac), 16 GB+ | qwen3-vl:4b or 8b | often does not finish (measured: 2b did 5 steps in 50 min); estimate unverified for 4b/8b |
+| CPU only, 8 GB | qwen3-vl:2b | measured: 5 steps in 50 min, no submit (TEST_REPORT.md §4) |
 
 ## Honest expectations
 - Local models are slower and make more mistakes than the best cloud models.

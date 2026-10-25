@@ -51,6 +51,8 @@ async def lifespan(app: FastAPI):
     data_dir = get_data_dir()
     data_dir.mkdir(parents=True, exist_ok=True)
     _log.info(f"Data directory: {data_dir}")
+    from core import e2e_hooks
+    e2e_hooks.apply()  # no-op unless the e2e suite set loopback mock endpoints
     _log.info(f"Token prefix: {_API_TOKEN[:8]}...")
     # Clean up orphaned browser processes from previous crash
     _kill_browser_processes()

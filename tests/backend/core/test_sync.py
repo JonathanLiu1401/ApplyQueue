@@ -484,3 +484,69 @@ def test_schedule_lists_merge_across_devices(world):
     search_store.upsert_search({"id": sa["id"], "schedule": {"kind": "off"}})
     world.use("laptop").sync_now()
     assert [r["id"] for r in json.loads(world.remote_file("schedules/searches.json"))["searches"]] == [sb["id"]]
+
+
+# ── M8 break-it: the remote's history is rewritten under us ──
+def _remote_text(world) -> str:
+    return "\n".join(world.remote_file(p) or "" for p in world.remote_tree())
+
+
+def _force_push_orphan(world):
+    """Someone 'cleans up' the state repo: a brand-new root commit, force-pushed over main."""
+    w = world.tmp / "rewriter"
+    shutil.rmtree(w, ignore_errors=True)
+    git("init", "-q", "-b", "main", str(w), cwd=world.tmp)
+    (w / "README.md").write_text("# fresh start\n")
+    git("add", "-A", cwd=w)
+    git("commit", "-q", "-m", "fresh start", cwd=w)
+    git("push", "-q", "--force", str(world.remote), "HEAD:main", cwd=w)
+
+
+def _force_rewind(world, n=1):
+    w = world.tmp / "rewinder"
+    shutil.rmtree(w, ignore_errors=True)
+    git("clone", "-q", str(world.remote), str(w), cwd=world.tmp)
+    git("reset", "-q", "--hard", f"HEAD~{n}", cwd=w)
+    git("push", "-q", "--force", "origin", "HEAD:main", cwd=w)
+
+
+def test_force_pushed_orphan_history_loses_nothing(world):
+    a = world.use("laptop")
+    add_job(JOB_A, status=js.SUBMITTED_UNCONFIRMED)
+    assert a.sync_now()["pushed"]
+    _force_push_orphan(world)
+    assert world.remote_tree() == ["README.md"]
+
+    a = world.use("laptop")
+    add_job(JOB_B, status=js.NEEDS_HUMAN)
+    r = a.sync_now()
+    assert r["ok"] and r["pushed"], r
+    assert jobs_store.get_job(JOB_A)["status"] == js.SUBMITTED_UNCONFIRMED   # local data untouched
+    text = _remote_text(world)
+    assert job_key(JOB_A) in text and job_key(JOB_B) in text                 # re-published
+    assert world.remote_file(".gitattributes").strip() == "*.jsonl merge=union"
+    # a second device starting from the rewritten remote sees both
+    world.use("desktop").sync_now()
+    assert {JOB_A, JOB_B} <= set(jobs_store.read_jobs())
+    assert world.use("laptop").sync_now()["ok"]                               # and it stays converged
+
+
+def test_remote_rewound_by_force_push_is_restored(world):
+    a = world.use("laptop")
+    add_job(JOB_A)
+    a.sync_now()
+    b = world.use("desktop")
+    b.sync_now()
+    jobs_store.update_job(JOB_A, status=js.CONFIRMED)
+    assert b.sync_now()["pushed"]
+    _force_rewind(world)                                  # drops the desktop's 'confirmed' commit
+    assert "confirmed" not in (world.remote_file("ledger/applications.jsonl") or "")
+
+    r = world.use("desktop").sync_now()
+    assert r["ok"], r
+    world.use("desktop").sync_now()
+    assert "confirmed" in (world.remote_file("ledger/applications.jsonl") or "")
+    world.use("laptop").sync_now()
+    assert jobs_store.get_job(JOB_A)["status"] == js.CONFIRMED
+    ledger = [json.loads(ln) for ln in world.remote_file("ledger/applications.jsonl").splitlines()]
+    assert len({e["id"] for e in ledger}) == len(ledger)  # no duplicated events after the re-merge

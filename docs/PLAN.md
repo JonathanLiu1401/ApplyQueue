@@ -375,7 +375,7 @@ M1 checklist (updated with each M1 commit):
     the private sync repo. They also get the schedules and the runner rules in the Grok Bot setup prompt
     (`/agents/setup-prompt`) and the per-agent prompt (`/schedules/agent-prompt?target=`). Agents push
     postings to `queue/postings/` with `search_id`; those are review-first unless the search is auto.
-  - Single runner across devices: `locks/search-<id>.json` (`SyncEngine.try_named_lock`, 3 h TTL, kept
+  - Single runner across devices: `locks/search-<id>.json` (`SyncEngine.try_named_lock`, 30 min TTL renewed by a heartbeat; agents use 3 h, kept
     apart from job locks). Runs are appended to `schedules/runs.jsonl`, so a slot
     another device or agent already ran is not run again. If the lock is held elsewhere, the slot counts
     as run there.
@@ -394,8 +394,10 @@ M1 checklist (updated with each M1 commit):
   - rate limits: 429 from a portal and from the AI provider, backoff growth, reset after a clean run;
   - expired logins: AI key or CLI login, and a portal session, giving pause, notice, re-auth, resume;
   - clock changes: manual clock back and forward, DST transitions, and a time-zone change while travelling.
-  - Known gaps to cover then: there is no lock heartbeat yet, so a run longer than 3 h can be taken over;
-    `schedules/searches.json` is last-writer-wins between devices.
+  - Closed in M8: a running search renews its lock and local "running" mark every 10 minutes
+    (30-minute TTL), so long runs are never taken over and a crashed or sleeping run frees the search
+    30 minutes after its last beat; `schedules/searches.json` is merged per search (each entry carries
+    its device and `updated_at`; git conflicts are resolved as a union, newest entry per id).
 
 ## 6. Guardrails (unchanged)
 Private repo only; no GitHub fork; no upstream PRs, publishing, domains, or npm names without

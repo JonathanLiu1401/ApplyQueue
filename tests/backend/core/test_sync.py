@@ -446,3 +446,37 @@ def test_schedules_exported_and_remote_runs_and_agent_postings(world):
     rows = [json.loads(x) for x in world.remote_file("schedules/runs.jsonl").splitlines()]
     assert {r["device"] for r in rows} == {"bot", a.device}
     assert "token" not in world.remote_file("schedules/searches.json").lower()
+
+
+def test_named_lock_heartbeat_and_takeover(world):
+    import time as _t
+    a = world.use("laptop")
+    a.sync_now()
+    assert a.try_named_lock("search-s_1", 2)["ok"]
+    _t.sleep(1.2)
+    assert world.use("laptop").renew_named("search-s_1", 2)["ok"]      # heartbeat pushes a fresh claim
+    _t.sleep(1.2)
+    assert world.use("desktop").try_named_lock("search-s_1", 600)["ok"] is False   # still alive
+    assert json.loads(world.remote_file("locks/search-s_1.json"))["renewed"] == 1
+    _t.sleep(2.2)                                                    # beats stopped (laptop asleep)
+    assert world.use("desktop").try_named_lock("search-s_1", 600)["stale_recovered"]
+    res = world.use("laptop").renew_named("search-s_1", 2)           # laptop wakes up
+    assert res == {"ok": False, "reason": "taken_over", "holder": "desktop"}
+    assert json.loads(world.remote_file("locks/search-s_1.json"))["worker"] == "desktop"
+
+
+def test_schedule_lists_merge_across_devices(world):
+    from core.searches import store as search_store
+    world.use("laptop")
+    sa = search_store.upsert_search({"titles": ["Data Analyst"], "schedule": {"kind": "hourly", "tz": "UTC"}})
+    world.use("laptop").sync_now()
+    world.use("desktop")
+    sb = search_store.upsert_search({"titles": ["Nurse"], "schedule": {"kind": "daily", "time": "08:00", "tz": "UTC"}})
+    world.use("desktop").sync_now()
+    rows = json.loads(world.remote_file("schedules/searches.json"))["searches"]
+    assert sorted((r["id"], r["device"] != "") for r in rows) == sorted([(sa["id"], True), (sb["id"], True)])
+    # the laptop turns its schedule off: only its entry goes, the desktop's stays
+    world.use("laptop")
+    search_store.upsert_search({"id": sa["id"], "schedule": {"kind": "off"}})
+    world.use("laptop").sync_now()
+    assert [r["id"] for r in json.loads(world.remote_file("schedules/searches.json"))["searches"]] == [sb["id"]]

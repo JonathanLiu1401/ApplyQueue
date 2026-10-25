@@ -1738,7 +1738,7 @@ def run_schedules_once() -> int:
             break
         ran += 1
         if _collection_thread is not None:
-            _collection_thread.join(timeout=runner.schedule.RUN_TTL_S)
+            _collection_thread.join(timeout=runner.schedule.MAX_RUN_S)
         runner.wait_idle(_collector_busy, timeout_s=60)
     return ran
 

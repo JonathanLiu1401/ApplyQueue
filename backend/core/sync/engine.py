@@ -232,6 +232,12 @@ class SyncEngine:
                             seen.add(ln)
                             lines.append(ln)
                 repo.resolve(path, "\n".join(lines) + "\n")
+            elif path == "schedules/searches.json":
+                try:
+                    from core.searches import schedule as _sched
+                except ImportError:  # pragma: no cover
+                    from backend.core.searches import schedule as _sched
+                repo.resolve(path, _sched.merge_conflict(ours, theirs))
             elif path.startswith("credentials/"):
                 repo.resolve(path, self._merge_portals_blobs(path, ours, theirs))
             elif path.startswith("locks/"):
@@ -403,6 +409,36 @@ class SyncEngine:
                 return {"ok": False, "reason": "lost_race", "holder": (self.read_lock(name) or {}).get("worker")}
             return {"ok": True, "stale_recovered": stale, **({"offline": True} if res.get("offline") else {})}
 
+    def renew_named(self, name: str, ttl_s: int) -> dict:
+        """Heartbeat for a named lock we hold: refresh ``claimed_at``. ``ok: False`` means another
+        runner took it over after it expired (we never take it back mid-run)."""
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", name or ""):
+            raise ValueError("bad lock name")
+        with self._lock:
+            repo = self.ensure_repo()
+            offline = False
+            try:
+                self._pull(repo)
+            except NetworkError:
+                offline = True
+            cur = self.read_lock(name)
+            if cur and cur.get("device") != self.device:
+                return {"ok": False, "reason": "taken_over", "holder": cur.get("worker")}
+            lock = dict(cur or {"name": name, "worker": self.label, "device": self.device})
+            lock.update(claimed_at=_now(), ttl_sec=int(ttl_s), renewed=int(lock.get("renewed") or 0) + 1)
+            self._write(self._lock_path(name), json.dumps(lock, indent=2) + "\n")
+            repo.commit_all(f"renew {name}")
+            if offline:
+                self._update_state(offline=True, pending=repo.ahead())
+                return {"ok": True, "offline": True}
+            try:
+                res = self._push(repo)
+            except (github.Offline, NetworkError):
+                return {"ok": True, "offline": True}
+            if (self.read_lock(name) or {}).get("device") != self.device:
+                return {"ok": False, "reason": "taken_over", "holder": (self.read_lock(name) or {}).get("worker")}
+            return {"ok": True, **({"offline": True} if res.get("offline") else {})}
+
     def release_named(self, name: str, push: bool = True) -> bool:
         with self._lock:
             repo = self.ensure_repo()
@@ -443,8 +479,20 @@ class SyncEngine:
         st["exported_runs"] = sorted(done)[-2000:]
         self._save_state(st)
         export = schedule.export_for_sync(self.device)
-        if export["searches"]:
-            self._write("schedules/searches.json", json.dumps(export, indent=2, sort_keys=True) + "\n")
+        path = store.repo_dir() / "schedules" / "searches.json"
+        try:
+            base = path.read_text(encoding="utf-8") if path.exists() else ""
+        except OSError:
+            base = ""
+        merged = schedule.merge_exports(base, export, self.device)
+        if merged["searches"] or base:
+            body = json.dumps(merged, indent=2, sort_keys=True) + "\n"
+            try:
+                same = json.loads(base or "{}").get("searches") == merged["searches"]
+            except ValueError:
+                same = False
+            if not same:
+                self._write("schedules/searches.json", body)
         return {"imported_runs": imported, "exported_runs": len(new), "scheduled": len(export["searches"])}
 
     def _remember_lock(self, key: str) -> None:

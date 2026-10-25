@@ -110,9 +110,10 @@ def test_stale_running_mark_is_forgotten(data):
     s = _search("hourly")
     t = ts(2026, 3, 2, 10, 0)
     schedule.begin(s["id"], now=t)                           # app killed / laptop slept mid-run
-    assert schedule.due(now=t + 3600) == []
-    assert schedule.due(now=t + schedule.RUN_TTL_S + 60) == [s["id"]]
+    assert schedule.due(now=t + schedule.RUN_TTL_S - 60) == []
+    assert schedule.due(now=t + schedule.RUN_TTL_S + 60) == []   # stale, but the slot was used
     assert "interrupted" in schedule.load_state()[s["id"]]
+    assert schedule.due(now=t + 3600 + 60) == [s["id"]]          # the next slot runs normally
 
 
 # ── outcomes ──
@@ -277,3 +278,107 @@ def test_export_remote_runs_and_prompts(data):
     rows = schedule.runs_to_export("dev1", set())
     assert rows and rows[-1]["outcome"] == "ok" and rows[-1]["device"] == "dev1"
     assert schedule.runs_to_export("dev1", {r["_key"] for r in rows}) == []
+
+
+# ── heartbeat (long runs are not stolen) and the merged shared schedule list ──
+def test_heartbeat_keeps_a_long_run_alive(data):
+    s = _search("hourly")
+    t = ts(2026, 3, 2, 10, 0)
+    assert schedule.begin(s["id"], "laptop", now=t)
+    for k in range(1, 13):                                   # a 2-hour run, beating every 10 minutes
+        assert schedule.heartbeat(s["id"], "laptop", now=t + k * schedule.HEARTBEAT_S)
+    now = t + 12 * schedule.HEARTBEAT_S + 60
+    assert schedule.due(now=now) == [] and schedule.begin(s["id"], "laptop", now=now) is False
+    assert schedule.heartbeat(s["id"], "desktop", now=now) is False      # not ours
+    # the beats stop (crash / sleep): the mark goes stale one TTL after the last beat
+    assert schedule.due(now=t + 12 * schedule.HEARTBEAT_S + schedule.RUN_TTL_S + 60) == [s["id"]]
+
+
+def test_tick_heartbeat_thread_renews_until_done(data):
+    import threading
+    s = _search("hourly")
+    t = ts(2026, 3, 2, 10, 0)
+    schedule.due(now=t)
+
+    class Lock(FakeLock):
+        def __init__(self):
+            super().__init__()
+            self.renewed = 0
+
+        def renew(self, sid):
+            self.renewed += 1
+            return {"ok": self.renewed < 3, "holder": "desktop"}
+    lock = Lock()
+    done = {}
+
+    def start(sid, on_done):
+        done["cb"] = on_done
+        return True
+    assert runner.tick(start, lambda: False, device="laptop", lock=lock, now=t + 3601)[0]["action"] == "started"
+    stop = threading.Event()
+    th = runner._start_heartbeat(s["id"], "laptop", lock, stop, every_s=0.01)
+    import time as _t
+    deadline = _t.time() + 5
+    while lock.renewed < 4 and _t.time() < deadline:
+        _t.sleep(0.01)
+    stop.set()
+    th.join(2)
+    assert lock.renewed >= 4                                  # keeps beating even after a takeover report
+    assert runner.beat_once(s["id"], "laptop", lock)["ok"] is False
+    done["cb"]([], [], False)
+    assert lock.released == [s["id"]]
+
+
+def test_sync_lock_renew():
+    calls = []
+
+    class Eng:
+        def renew_named(self, name, ttl):
+            calls.append((name, ttl))
+            return {"ok": True}
+    assert runner.SyncLock(engine_factory=Eng, enabled=lambda: True).renew("s_1") == {"ok": True}
+    assert calls == [("search-s_1", schedule.RUN_TTL_S)]
+    assert runner.SyncLock(engine_factory=Eng, enabled=lambda: False).renew("s_1")["local_only"]
+
+    class Broken:
+        def renew_named(self, *a):
+            raise RuntimeError("offline")
+    assert runner.SyncLock(engine_factory=Broken, enabled=lambda: True).renew("s_1")["unsynced"]
+
+
+def test_merge_exports_keeps_other_devices_and_drops_our_removed():
+    shared = {"version": 2, "searches": [
+        {"id": "s_a", "device": "laptop", "updated_at": "2026-03-01T00:00:00+00:00", "cron": "0 9 * * *"},
+        {"id": "s_b", "device": "desktop", "updated_at": "2026-03-01T00:00:00+00:00", "cron": "0 * * * *"},
+        {"id": "s_old", "device": "laptop", "updated_at": "2026-02-01T00:00:00+00:00", "cron": "0 8 * * *"}]}
+    ours = {"version": 2, "updated_by": "laptop", "searches": [
+        {"id": "s_a", "device": "laptop", "updated_at": "2026-03-02T00:00:00+00:00", "cron": "30 9 * * *"}]}
+    out = schedule.merge_exports(json.dumps(shared), ours, "laptop")
+    assert [(r["id"], r["cron"]) for r in out["searches"]] == [("s_a", "30 9 * * *"), ("s_b", "0 * * * *")]
+    # nothing scheduled here any more: only our entries go
+    assert [r["id"] for r in schedule.merge_exports(out, {"searches": []}, "laptop")["searches"]] == ["s_b"]
+    # garbage in the shared file never breaks the merge
+    assert schedule.merge_exports("{not json", ours, "laptop")["searches"][0]["id"] == "s_a"
+
+
+def test_merge_conflict_is_a_union_newest_wins():
+    ours = json.dumps({"version": 2, "searches": [
+        {"id": "s_a", "device": "laptop", "updated_at": "2026-03-02T00:00:00+00:00", "paused": True},
+        {"id": "s_c", "device": "laptop", "updated_at": "2026-03-01T00:00:00+00:00"}]})
+    theirs = json.dumps({"version": 2, "searches": [
+        {"id": "s_a", "device": "laptop", "updated_at": "2026-03-01T00:00:00+00:00", "paused": False},
+        {"id": "s_b", "device": "desktop", "updated_at": "2026-03-01T00:00:00+00:00"}]})
+    got = json.loads(schedule.merge_conflict(ours, theirs))
+    assert [r["id"] for r in got["searches"]] == ["s_a", "s_b", "s_c"]
+    assert got["searches"][0]["paused"] is True
+    assert json.loads(schedule.merge_conflict(None, "garbage"))["searches"] == []
+
+
+def test_export_stamps_device_and_spec_time(data):
+    s = _search("hourly")
+    schedule.due(now=ts(2026, 3, 2, 10, 0))
+    row = schedule.export_for_sync("laptop")["searches"][0]
+    assert row["device"] == "laptop" and row["updated_at"].startswith("2026-03-02T10:00")
+    assert schedule.export_for_sync("laptop")["lock_ttl_s"] == schedule.AGENT_LOCK_TTL_S
+    schedule.pause(s["id"])
+    assert schedule.export_for_sync("laptop")["searches"][0]["updated_at"] > row["updated_at"]

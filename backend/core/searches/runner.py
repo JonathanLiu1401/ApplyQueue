@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from typing import Callable
 
@@ -51,6 +52,16 @@ class SyncLock:
             log.warning("schedule lock unavailable (%s); running locally", type(e).__name__)
             return {"ok": True, "unsynced": True}
 
+    def renew(self, sid: str) -> dict:
+        """Heartbeat: push a fresh claimed_at so a long run is not taken over."""
+        if not self._on():
+            return {"ok": True, "local_only": True}
+        try:
+            return self._engine().renew_named(f"search-{sid}", schedule.RUN_TTL_S)
+        except Exception as e:
+            log.warning("schedule lock renew failed (%s)", type(e).__name__)
+            return {"ok": True, "unsynced": True}
+
     def release(self, sid: str) -> None:
         if not self._on():
             return
@@ -90,7 +101,10 @@ def tick(start_run: Callable[[str, Callable], bool], is_busy: Callable[[], bool]
             results.append({"id": sid, "action": "already_running"})
             continue
 
-        def on_done(errors, log_lines=None, cancelled=False, _sid=sid):
+        stop = threading.Event()
+
+        def on_done(errors, log_lines=None, cancelled=False, _sid=sid, _stop=stop):
+            _stop.set()
             try:
                 res = schedule.finish(_sid, outcome_from(errors, log_lines or [], cancelled),
                                       list(errors or []) + list(log_lines or [])[-50:], device=device)
@@ -110,12 +124,40 @@ def tick(start_run: Callable[[str, Callable], bool], is_busy: Callable[[], bool]
             lock.release(sid)
             results.append({"id": sid, "action": "waiting_busy"})
         else:
+            _start_heartbeat(sid, device, lock, stop)
             results.append({"id": sid, "action": "started"})
         break
     return results
 
 
-def wait_idle(is_busy: Callable[[], bool], timeout_s: float = schedule.RUN_TTL_S, poll_s: float = 2.0) -> bool:
+def beat_once(sid: str, device: str, lock: SyncLock) -> dict:
+    """One heartbeat: renew the local running mark and the sync-repo lock."""
+    schedule.heartbeat(sid, device)
+    got = lock.renew(sid)
+    if not got.get("ok"):
+        # Our lock expired and another runner took it (e.g. this laptop slept). Job claim locks still
+        # stop double applies; record it so the run history shows the overlap.
+        log.warning("Scheduled search %s: lock taken over by %s", sid, got.get("holder"))
+    return got
+
+
+def _start_heartbeat(sid: str, device: str, lock: SyncLock, stop: threading.Event,
+                     every_s: float | None = None) -> threading.Thread:
+    every = schedule.HEARTBEAT_S if every_s is None else every_s
+
+    def loop():
+        while not stop.wait(every):
+            try:
+                beat_once(sid, device, lock)
+            except Exception as e:  # never kill a run over a heartbeat
+                log.warning("heartbeat failed (%s)", type(e).__name__)
+
+    t = threading.Thread(target=loop, name=f"schedule-heartbeat-{sid}", daemon=True)
+    t.start()
+    return t
+
+
+def wait_idle(is_busy: Callable[[], bool], timeout_s: float = schedule.MAX_RUN_S, poll_s: float = 2.0) -> bool:
     end = time.time() + timeout_s
     while is_busy():
         if time.time() > end:

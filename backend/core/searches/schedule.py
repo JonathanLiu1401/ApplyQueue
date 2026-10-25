@@ -37,7 +37,10 @@ KINDS = ("off", "hourly", "daily", "custom")
 MIN_GAP_S = 15 * 60
 BACKOFF_BASE_S = 15 * 60
 BACKOFF_MAX_S = 24 * 3600
-RUN_TTL_S = 3 * 3600          # a "running" mark older than this is a crashed / slept-through run
+RUN_TTL_S = 30 * 60           # lock / "running" mark TTL; a live run renews it every HEARTBEAT_S
+HEARTBEAT_S = 10 * 60         # so only a crashed or slept-through run goes stale
+AGENT_LOCK_TTL_S = 3 * 3600   # always-on agents cannot heartbeat, so their locks live longer
+MAX_RUN_S = 6 * 3600          # the headless runner gives up waiting on one run after this
 MAX_ERRORS_BEFORE_PAUSE = 5
 HISTORY = 20
 
@@ -240,7 +243,23 @@ def _schedule_next(st: dict, cron: str, tz: str | None, now: float) -> None:
 
 def _running(st: dict, now: float) -> bool:
     r = st.get("running")
-    return bool(r) and now - float(r.get("since") or 0) < RUN_TTL_S
+    if not r:
+        return False
+    beat = max(float(r.get("since") or 0), float(r.get("beat") or 0))
+    return now - beat < RUN_TTL_S
+
+
+def heartbeat(sid: str, device: str = "", now: float | None = None) -> bool:
+    """Renew this device's "running" mark during a long run; False if the run is not ours any more."""
+    now = time.time() if now is None else now
+
+    def fn(st):
+        r = st.get("running")
+        if not r or (device and r.get("device") not in ("", device)):
+            return False
+        r["beat"] = now
+        return True
+    return _mutate(sid, fn)
 
 
 def refresh(search: dict, st: dict, now: float) -> None:
@@ -252,6 +271,8 @@ def refresh(search: dict, st: dict, now: float) -> None:
         return
     tz = (search.get("schedule") or {}).get("tz")
     if st.get("cron") != cron or st.get("tz") != tz or not st.get("next_run_at"):
+        if st.get("cron") != cron or st.get("tz") != tz:
+            st["spec_at"] = now           # the shared list keeps the newest entry per search
         _schedule_next(st, cron, tz, now)
         return
     soonest = next_after(cron, now, tz)
@@ -380,7 +401,7 @@ def skip(sid: str, holder: str | None, now: float | None = None) -> None:
 
 def pause(sid: str, reason: str = "user") -> dict:
     def fn(st):
-        st.update(paused=True, paused_reason=reason)
+        st.update(paused=True, paused_reason=reason, spec_at=time.time())
         return dict(st)
     return _mutate(sid, fn)
 
@@ -394,6 +415,7 @@ def resume(sid: str, now: float | None = None) -> dict:
         for k in ("paused", "paused_reason", "notice", "backoff_until", "interrupted"):
             st.pop(k, None)
         st["failures"] = 0
+        st["spec_at"] = now
         cron = cron_for(search.get("schedule"))
         if cron:
             st["next_run_at"] = next_after(cron, now, (search.get("schedule") or {}).get("tz"))
@@ -440,8 +462,12 @@ def public_state(sid: str, st: dict | None = None) -> dict:
             "failures": int(st.get("failures") or 0), "history": st.get("history", [])[-5:]}
 
 
-def export_for_sync(device: str) -> dict:
-    """What always-on agents need, written to ``schedules/searches.json`` in the private sync repo."""
+def export_for_sync(device: str, now: float | None = None) -> dict:
+    """What always-on agents need, written to ``schedules/searches.json`` in the private sync repo.
+
+    Each entry carries the device that owns it and ``updated_at``, so devices merge their lists
+    (:func:`merge_exports`) instead of overwriting each other."""
+    now = time.time() if now is None else now
     state = load_state()
     out = []
     for s in store.list_searches():
@@ -452,8 +478,60 @@ def export_for_sync(device: str) -> dict:
         out.append({"id": s["id"], "name": s["name"], "titles": s["titles"], "locations": s["locations"],
                     "mode": s["mode"], "max_jobs": s.get("max_jobs") or 0, "cron": cron,
                     "tz": (s.get("schedule") or {}).get("tz") or "local", "paused": bool(st.get("paused")),
-                    "next_run_at": _iso(st.get("next_run_at")), "last_run_at": _iso(st.get("last_run_at"))})
-    return {"version": 1, "updated_by": device, "lock_ttl_s": RUN_TTL_S, "min_gap_s": MIN_GAP_S, "searches": out}
+                    "next_run_at": _iso(st.get("next_run_at")), "last_run_at": _iso(st.get("last_run_at")),
+                    "device": device, "updated_at": _iso(st.get("spec_at")) or _iso(now)})
+    return {"version": 2, "updated_by": device, "lock_ttl_s": AGENT_LOCK_TTL_S, "min_gap_s": MIN_GAP_S,
+            "searches": out}
+
+
+def _entries(doc) -> list[dict]:
+    if isinstance(doc, str):
+        try:
+            doc = json.loads(doc) if doc.strip() else {}
+        except ValueError:
+            doc = {}
+    rows = (doc or {}).get("searches") if isinstance(doc, dict) else None
+    return [r for r in (rows or []) if isinstance(r, dict) and isinstance(r.get("id"), str)]
+
+
+def merge_exports(base, ours: dict, device: str) -> dict:
+    """Merge this device's export into the shared list: other devices' entries are kept, this
+    device's entries are replaced (and dropped when unscheduled here). Last-writer-wins only per
+    search id, by ``updated_at`` then device id, so two devices never erase each other's lists."""
+    merged: dict[str, dict] = {}
+    for r in _entries(base):
+        if r.get("device") == device:
+            continue          # ours are re-added below; ones we no longer schedule go away
+        merged[r["id"]] = r
+    for r in _entries(ours):
+        cur = merged.get(r["id"])
+        if cur is None or (str(r.get("updated_at") or ""), str(r.get("device") or "")) >= \
+                (str(cur.get("updated_at") or ""), str(cur.get("device") or "")):
+            merged[r["id"]] = r
+    out = dict(ours)
+    out["searches"] = sorted(merged.values(), key=lambda r: r["id"])
+    return out
+
+
+def merge_conflict(ours_blob: str | None, theirs_blob: str | None) -> str:
+    """Resolve a git conflict on ``schedules/searches.json``: union by id, newest entry wins."""
+    merged: dict[str, dict] = {}
+    for r in _entries(theirs_blob or "") + _entries(ours_blob or ""):
+        cur = merged.get(r["id"])
+        if cur is None or (str(r.get("updated_at") or ""), str(r.get("device") or "")) >= \
+                (str(cur.get("updated_at") or ""), str(cur.get("device") or "")):
+            merged[r["id"]] = r
+    head = {}
+    for blob in (theirs_blob, ours_blob):
+        try:
+            d = json.loads(blob or "{}")
+            if isinstance(d, dict):
+                head.update({k: v for k, v in d.items() if k != "searches"})
+        except ValueError:
+            pass
+    head.setdefault("version", 2)
+    head["searches"] = sorted(merged.values(), key=lambda r: r["id"])
+    return json.dumps(head, indent=2, sort_keys=True) + "\n"
 
 
 def runs_to_export(device: str, already: set[str]) -> list[dict]:

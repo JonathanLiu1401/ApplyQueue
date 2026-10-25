@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import threading
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -85,6 +86,7 @@ class Policy:
     needs_human: bool = False
     finished: bool = False
     log: list = field(default_factory=list)
+    empty_since: float = 0.0  # like a real model: give up on a page that stays empty for a minute
 
     def decide(self, st: dict) -> list[dict]:
         els, text, last = st["els"], st["text"], st["last"]
@@ -106,12 +108,19 @@ class Policy:
             self.finished = True
             return [{"done": {"text": "Blocked by a human check.", "success": False}}]
         inputs = [e for e in els if e.tag in ("input", "textarea", "select")]
+        if inputs:
+            self.empty_since = 0.0
         buttons = [e for e in els if e.tag in ("button", "a") or (e.tag == "input" and e.attr("type") == "submit")]
         if not inputs:
             if not buttons:
                 if self.submitted:  # submitted and nothing on the page: claim done, the app decides
                     self.finished = True
                     return [{"done": {"text": "I clicked submit.", "success": True}}]
+                self.empty_since = self.empty_since or time.monotonic()
+                if time.monotonic() - self.empty_since > 60:
+                    self.finished = True
+                    self.needs_human = True
+                    return [{"done": {"text": "The page never showed an application form.", "success": False}}]
                 return [{"wait": {"seconds": 1}}]
         sig = (st["url"].split("?")[0], tuple(sorted(e.attr("id") or e.attr("name") for e in inputs)))
         pw = [e for e in inputs if e.attr("type") == "password"]

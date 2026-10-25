@@ -11,6 +11,7 @@ Usage:
 """
 import argparse
 import asyncio
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -60,9 +61,9 @@ except ImportError:
 from browser_use import Agent, BrowserSession  # noqa: E402
 
 try:  # noqa: E402 - needs browser_use, so imported after the privacy env is applied
-    from core.apply_tools import RunLedger, build_apply_tools, read_page_evidence
+    from core.apply_tools import RunLedger, build_apply_tools, page_load_watchdog, read_page_evidence
 except ImportError:
-    from backend.core.apply_tools import RunLedger, build_apply_tools, read_page_evidence
+    from backend.core.apply_tools import RunLedger, build_apply_tools, page_load_watchdog, read_page_evidence
 
 # Lock for thread-safe QA file writes
 _qa_lock = asyncio.Lock()
@@ -244,7 +245,10 @@ async def _apply_claimed(job, profile, qa, applied_labels, easy_apply, worker_id
     ledger = RunLedger()
     apply_tools = build_apply_tools(
         ledger=ledger, profile=profile, qa=qa,
-        context={"source": "LinkedIn" if _is_linkedin(url) else (job.get("source") or "Company website"), "company": company, "title": title, "url": url},
+        context={"source": "LinkedIn" if _is_linkedin(url) else (job.get("source") or "Company website"), "company": company, "title": title, "url": url,
+                 # Extra domains this job's application flow may use (personal data is only typed there).
+                 "apply_domains": list(job.get("apply_domains") or []) + [d for d in os.environ.get(
+                     "APPLYQUEUE_APPLY_DOMAINS", "").split(",") if d.strip()]},
         vault=vault, account_email=agent_sensitive_data["account_email"],
         sensitive_data=agent_sensitive_data,
     )
@@ -367,7 +371,16 @@ async def _apply_claimed(job, profile, qa, applied_labels, easy_apply, worker_id
     )
 
     try:
-        result = await agent.run(max_steps=MAX_STEPS)
+        # A page still loading after the budget is stopped (slow-loris), see page_load_watchdog.
+        try:
+            load_budget = float(os.environ.get("APPLYQUEUE_PAGE_LOAD_BUDGET_S") or 35)
+        except ValueError:
+            load_budget = 35.0
+        watchdog = asyncio.create_task(page_load_watchdog(browser, budget=load_budget, ledger=ledger))
+        try:
+            result = await agent.run(max_steps=MAX_STEPS)
+        finally:
+            watchdog.cancel()
 
         # Extract Q&A from history
         _, new_questions = extract_from_history(result)
@@ -456,6 +469,8 @@ async def _apply_claimed(job, profile, qa, applied_labels, easy_apply, worker_id
             "needs_human_fields": ledger.needs_human,
             "agent_claimed_success": agent_claimed,
             "outcome_reason": outcome.reason,
+            "blocked_exfil": ledger.blocked_exfil,
+            "stopped_loads": len(ledger.stopped_loads),
         }
         if success:
             await save_job_status(url, outcome.status, **evidence_fields)

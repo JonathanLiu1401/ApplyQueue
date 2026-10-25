@@ -50,6 +50,8 @@ const BAD_PATH = [
 const EMAIL = /[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+\.)+[A-Za-z]{2,}/g;
 const EMAIL_ALLOW = /@((.+\.)?example\.(com|org|net)|users\.noreply\.github\.com|localhost|test\.invalid)$/i;
 const EMAIL_FALSE = /@\d+x\.(png|jpe?g|webp|svg)$/i; // retina asset names like icon@2x.png
+// GitHub service addresses (web-flow committer, Dependabot PR bodies): not personal data.
+const EMAIL_SERVICE = /^(noreply|support)@github\.com$/i;
 const PHONE = /(?<![\w.+-])(\+?1[ .-]?)?\(?\d{3}\)?[ .-]\d{3}[ .-]\d{4}(?![\w-])/g;
 const PHONE_ALLOW = /555[ .-]?01\d\d$/;
 // Lockfiles carry third-party package metadata (e.g. npm maintainers' public emails).
@@ -86,7 +88,7 @@ function denyHits(text) {
 
 function genericHits(text) {
   const out = [];
-  for (const m of text.matchAll(EMAIL)) if (!EMAIL_ALLOW.test(m[0]) && !EMAIL_FALSE.test(m[0])) out.push("email-address");
+  for (const m of text.matchAll(EMAIL)) if (!EMAIL_ALLOW.test(m[0]) && !EMAIL_FALSE.test(m[0]) && !EMAIL_SERVICE.test(m[0])) out.push("email-address");
   for (const m of text.matchAll(PHONE)) if (!PHONE_ALLOW.test(m[0])) out.push("phone-number");
   return out;
 }

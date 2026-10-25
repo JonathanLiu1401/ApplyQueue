@@ -10,10 +10,10 @@ CI runs: `https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/<id>`
 
 | OS / arch | Runner | What ran | Result |
 |---|---|---|---|
-| Linux x86_64 | ubuntu-22.04 | tsc, eslint, vite build, vitest, Playwright, full pytest (incl. agent e2e on 5 mock ATS), PyInstaller sidecar, **UI e2e: production frontend + packaged sidecar**, binary integration | e097bd0 green ([40190366638](https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/40190366638)); 88e4c7f pending ([40192198161](https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/40192198161)) |
-| Linux x86_64, real Tauri app | box (local) | `tauri build --no-bundle`, then the **real app over W3C WebDriver** (tauri-driver + WebKitWebDriver + xvfb): the Rust shell spawns the bundled sidecar, the token goes over IPC, `/health`, Welcome screen | launch, token handoff and Welcome screen pass. The wizard step is still being fixed (see §5). Not in CI yet |
-| Windows x64 | windows-latest | same as Linux, with the .exe sidecar | 571cca5 failed (kill-mid-apply test used the venv-launcher pid, fixed in 0dc1333); e097bd0 green ([40190366638](https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/40190366638)) |
-| macOS Intel x86_64 (hard requirement) | macos-15-intel (native, not Rosetta) | pytest, x86_64 sidecar + `--self-test` (`machine: x86_64`), Tauri bundle x86_64, UI e2e against the packaged x86_64 sidecar, `smoke-macos-app.sh` (launch the .app, check `/health`) | 571cca5 green; e097bd0 **failed** in UI e2e (auto-fill timing race on the slow runner, fixed in 88e4c7f, re-running) |
+| Linux x86_64 | ubuntu-22.04 | tsc, eslint, vite build, vitest, Playwright, full pytest (incl. agent e2e on 5 mock ATS), PyInstaller sidecar, **UI e2e: production frontend + packaged sidecar**, binary integration | e097bd0 green ([40190366638](https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/40190366638)); 88e4c7f failed ([40192198161](https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/40192198161)): the packaged orphan test compared the bootloader pid with the child pid in `/health` (test bug, fixed in d915b59); d915b59 pending |
+| Linux x86_64, real Tauri app | box (local) | `tauri build --no-bundle`, then the **real app over W3C WebDriver** (tauri-driver + WebKitWebDriver + xvfb): the Rust shell spawns the bundled sidecar, the token goes over IPC, `/health`, Welcome screen | **passes locally**: launch, token handoff, Welcome, the full wizard (local mode) → `onboarding_completed`, then the 3-step quick start through the real webview creates the search. The wizard failure was a test bug ("Skip for now" closes the whole wizard). Added as a Build Check step on Linux in d915b59 |
+| Windows x64 | windows-latest | same as Linux, with the .exe sidecar | 571cca5 failed (kill-mid-apply test used the venv-launcher pid, fixed in 0dc1333); e097bd0 green ([40190366638](https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/40190366638)); 88e4c7f failed: the orphan backend in dev (venv) mode never noticed its window died, because the Windows venv `python.exe` redirector sat in between and outlived the window. It then held the port, and 6 UI e2e tests failed after it. Fixed in d915b59 (packaged builds were not affected) |
+| macOS Intel x86_64 (hard requirement) | macos-15-intel (native, not Rosetta) | pytest, x86_64 sidecar + `--self-test` (`machine: x86_64`), Tauri bundle x86_64, UI e2e against the packaged x86_64 sidecar, `smoke-macos-app.sh` (launch the .app, check `/health`) | 571cca5 green; e097bd0 **failed** in UI e2e (auto-fill timing race on the slow runner, fixed in 88e4c7f); 88e4c7f failed on the same packaged orphan-test pid bug as Linux, plus follow-on failures; fixed in d915b59 |
 | macOS Apple silicon arm64 | macos-latest via `workflow_dispatch run_macos=true` | full test matrix incl. UI e2e against the arm64 sidecar | **not run yet in M8**; dispatch queued after the 88e4c7f push run |
 
 macOS has no WebDriver for WKWebView. On macOS the packaged app is covered by (a) UI e2e,
@@ -76,6 +76,7 @@ and (b) the launch/health smoke of the real `.app` bundle.
 | 1b862ca | real Tauri app WebDriver test |
 | 88e4c7f | UI e2e wait for auto-fill on slow runners (Intel Mac) |
 | 2ac9b2f | Windows: schedule time zones silently ignored (no tz database). `tzdata` bundled; DST/time-zone tests; frozen self-test checks the tz database on all OSes |
+| d915b59 | Windows dev mode: orphan detection through the venv redirector; packaged orphan test pid fix; real-app WebDriver wizard fix and a Linux CI job |
 
 ## 6. Known limitations
 
@@ -88,5 +89,5 @@ and (b) the launch/health smoke of the real `.app` bundle.
 ## 7. Not tested yet (honest)
 
 - Apple-silicon arm64 run in M8 (dispatch pending).
-- Real Tauri app over WebDriver in CI (works locally on Linux up to the Welcome screen; wizard step and CI job pending). Windows msedgedriver not attempted.
+- Real Tauri app over WebDriver: Linux CI job added in d915b59, first result pending. Windows msedgedriver not attempted.
 - Real Gmail/Outlook/GitHub accounts (by design: mocks only).

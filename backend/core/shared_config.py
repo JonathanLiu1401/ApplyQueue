@@ -1,6 +1,7 @@
 """Shared config, utilities, and credential management."""
 import asyncio
 import json
+import os
 import re
 import subprocess
 import sys
@@ -64,6 +65,17 @@ _PRIVATE_IP_PREFIXES = ("127.", "10.", "192.168.", "172.16.", "172.17.", "172.18
                         "172.24.", "172.25.", "172.26.", "172.27.", "172.28.",
                         "172.29.", "172.30.", "172.31.", "0.", "169.254.")
 
+def _e2e_loopback_ok(host: str, port: int | None) -> bool:
+    """Test-only: the e2e suite serves mock ATS sites on 127.0.0.1.
+
+    Needs APPLYQUEUE_E2E_ATS_PORTS (comma list of ports) so a normal install,
+    which never sets it, keeps the SSRF block for every loopback address."""
+    raw = os.environ.get("APPLYQUEUE_E2E_ATS_PORTS", "").strip()
+    if not raw or host != "127.0.0.1" or port is None:
+        return False
+    return str(port) in {p.strip() for p in raw.split(",") if p.strip()}
+
+
 def validate_job_url(url: str) -> bool:
     """Reject URLs pointing to private/internal networks (SSRF prevention)."""
     from urllib.parse import urlparse
@@ -72,6 +84,8 @@ def validate_job_url(url: str) -> bool:
         host = (parsed.hostname or "").lower()
         if not host or not parsed.scheme.startswith("http"):
             return False
+        if _e2e_loopback_ok(host, parsed.port):
+            return True
         if host in ("localhost", "0.0.0.0", "[::]", "[::1]"):
             return False
         if any(host.startswith(p) for p in _PRIVATE_IP_PREFIXES):

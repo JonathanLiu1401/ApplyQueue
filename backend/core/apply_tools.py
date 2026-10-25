@@ -26,7 +26,15 @@ except ImportError:  # pragma: no cover
     from backend.core.credential_vault import CredentialVault, normalize_host
     from backend.core.outcome import PageEvidence, detect_confirmation
 
-PAGE_TEXT_JS = "() => (document.body ? document.body.innerText : '').slice(0, 20000)"
+# The page's own text plus same-origin iframes (iCIMS-style hosted forms show their
+# confirmation inside the frame).
+PAGE_TEXT_JS = r"""() => {
+  const parts = [document.body ? document.body.innerText : ''];
+  for (const fr of document.querySelectorAll('iframe, frame')) {
+    try { const d = fr.contentDocument; if (d && d.body) parts.push(d.body.innerText); } catch (e) { /* cross-origin */ }
+  }
+  return parts.join('\n').slice(0, 20000);
+}"""
 
 
 @dataclass

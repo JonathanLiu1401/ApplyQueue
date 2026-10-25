@@ -25,11 +25,29 @@ Evaluate = Callable[..., Awaitable[Any]]
 # ── In-page scripts ─────────────────────────────────────────────────────────
 
 SCAN_JS = r"""() => {
+  // Same-origin iframes (iCIMS-style hosted forms) and open shadow roots are scanned too.
+  const roots = (() => {
+    const out = [], seen = new Set();
+    const walk = (root) => {
+      if (!root || seen.has(root)) return; seen.add(root); out.push(root);
+      for (const el of root.querySelectorAll('*')) {
+        if (el.shadowRoot) walk(el.shadowRoot);
+        if (el.tagName === 'IFRAME' || el.tagName === 'FRAME') {
+          let d = null; try { d = el.contentDocument; } catch (e) { d = null; }
+          if (d && d.documentElement) walk(d);
+        }
+      }
+    };
+    walk(document);
+    return out;
+  })();
+  const all = (sel) => roots.flatMap(r => Array.from(r.querySelectorAll(sel)));
+  const byId = (el, id) => { const r = el.getRootNode(); return (r.getElementById ? r.getElementById(id) : null) || document.getElementById(id); };
   const SKIP_TYPES = new Set(['hidden','submit','button','reset','image','search','password']);
   const visible = (el) => {
     if (el.type === 'file') return true;  // file inputs are often visually hidden behind a button
     const r = el.getBoundingClientRect();
-    const s = getComputedStyle(el);
+    const s = (el.ownerDocument.defaultView || window).getComputedStyle(el);
     if (s.display === 'none' || s.visibility === 'hidden') return false;
     if (r.width > 0 || r.height > 0) return true;
     // Styled radios/checkboxes hide the input; count them if their label is visible.
@@ -44,7 +62,7 @@ SCAN_JS = r"""() => {
     if (el.labels && el.labels.length) return clean(Array.from(el.labels).map(l => l.innerText).join(' '));
     const aria = el.getAttribute('aria-label'); if (aria) return clean(aria);
     const lb = el.getAttribute('aria-labelledby');
-    if (lb) { const t = clean(lb.split(/\s+/).map(id => (document.getElementById(id) || {}).innerText || '').join(' ')); if (t) return t; }
+    if (lb) { const t = clean(lb.split(/\s+/).map(id => (byId(el, id) || {}).innerText || '').join(' ')); if (t) return t; }
     return '';
   };
   const questionLabel = (el) => {
@@ -69,7 +87,7 @@ SCAN_JS = r"""() => {
   const groups = new Map();
   // Keys must stay unique across re-scans, so the counter lives on window.
   const nextKey = (p) => p + (window.__aqKeySeq = (window.__aqKeySeq || 0) + 1);
-  const nodes = document.querySelectorAll('input, textarea, select, [contenteditable=true][role=textbox]');
+  const nodes = all('input, textarea, select, [contenteditable=true][role=textbox]');
   for (const el of nodes) {
     const type = (el.getAttribute('type') || el.type || el.tagName).toLowerCase();
     if (SKIP_TYPES.has(type)) continue;
@@ -125,7 +143,25 @@ SCAN_JS = r"""() => {
 # Strategy 2 (search): open a searchable dropdown/combobox, type, click the matching option.
 # Strategy 3 (typing): synthetic per-character key events for inputs that ignore direct sets.
 FILL_JS = r"""(key, value, strategy) => (async () => {
-  const els = Array.from(document.querySelectorAll('[data-aq-key="' + CSS.escape(key) + '"]'));
+  // Same-origin iframes (iCIMS-style hosted forms) and open shadow roots are scanned too.
+  const roots = (() => {
+    const out = [], seen = new Set();
+    const walk = (root) => {
+      if (!root || seen.has(root)) return; seen.add(root); out.push(root);
+      for (const el of root.querySelectorAll('*')) {
+        if (el.shadowRoot) walk(el.shadowRoot);
+        if (el.tagName === 'IFRAME' || el.tagName === 'FRAME') {
+          let d = null; try { d = el.contentDocument; } catch (e) { d = null; }
+          if (d && d.documentElement) walk(d);
+        }
+      }
+    };
+    walk(document);
+    return out;
+  })();
+  const all = (sel) => roots.flatMap(r => Array.from(r.querySelectorAll(sel)));
+  const byId = (el, id) => { const r = el.getRootNode(); return (r.getElementById ? r.getElementById(id) : null) || document.getElementById(id); };
+  const els = all('[data-aq-key="' + CSS.escape(key) + '"]');
   if (!els.length) return JSON.stringify({ok: false, detail: 'element not found'});
   const clean = (t) => (t || '').replace(/\s+/g, ' ').trim().toLowerCase();
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -144,7 +180,8 @@ FILL_JS = r"""(key, value, strategy) => (async () => {
   const labelText = (e) => (e.labels && e.labels.length ? Array.from(e.labels).map(l => l.innerText).join(' ') : '') || e.getAttribute('aria-label') || e.value;
   const fire = (el, ...types) => types.forEach(t => el.dispatchEvent(new Event(t, {bubbles: true})));
   const setNative = (el, v) => {
-    const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const w = el.ownerDocument.defaultView || window;
+    const proto = el.tagName === 'TEXTAREA' ? w.HTMLTextAreaElement.prototype : w.HTMLInputElement.prototype;
     const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
     setter.call(el, v);
   };
@@ -180,9 +217,23 @@ FILL_JS = r"""(key, value, strategy) => (async () => {
     el.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowDown', bubbles: true}));
     for (let i = 0; i < 10; i++) {
       await sleep(150);
-      const opts = Array.from(document.querySelectorAll('[role=option],[class*=option]')).filter(o => o.offsetParent !== null);
+      const opts = all('[role=option],[class*=option]').filter(o => o.offsetParent !== null);
       const ranked = opts.map(o => ({o, s: score(o.innerText)})).filter(x => x.s > 0).sort((a, b) => b.s - a.s);
       if (ranked.length) { ranked[0].o.click(); await sleep(100); return JSON.stringify({ok: true, detail: clean(ranked[0].o.innerText)}); }
+    }
+    // No option matched the full answer ("Springfield, Illinois" vs "Springfield, IL"): search by its
+    // first part and take an option that starts with it.
+    const head = text.split(/[,(\/-]/)[0].trim();
+    if (head && head.length >= 3 && head !== text) {
+      setNative(el, head); fire(el, 'input');
+      el.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowDown', bubbles: true}));
+      for (let i = 0; i < 6; i++) {
+        await sleep(150);
+        const opts = all('[role=option],[class*=option]').filter(o => o.offsetParent !== null);
+        const hit = opts.find(o => clean(o.innerText).startsWith(clean(head)));
+        if (hit) { hit.click(); await sleep(100); return JSON.stringify({ok: true, detail: clean(hit.innerText)}); }
+      }
+      setNative(el, text); fire(el, 'input');
     }
     el.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
     return JSON.stringify({ok: el.value.trim() !== '', detail: 'enter'});
@@ -324,11 +375,20 @@ def answer_bank_lookup(label: str, qa: dict[str, str], cutoff: float = 0.82) -> 
     match = difflib.get_close_matches(norm, list(bank), n=1, cutoff=cutoff)
     if match:
         return str(bank[match[0]])
-    # Containment either way for long-ish questions ("Why do you want to work at X?" vs "why do you want to work here")
+    # Whole-word containment either way for long-ish questions ("Why do you want to work at X?" vs
+    # "why do you want to work here"). Words, not characters: "location" is not in "relocation".
+    nw = norm.split()
     for k, v in bank.items():
-        if len(k) > 12 and (k in norm or norm in k):
+        kw = k.split()
+        short, long_ = (kw, nw) if len(kw) <= len(nw) else (nw, kw)
+        if len(short) >= 3 and _contains_words(long_, short):
             return str(v)
     return None
+
+
+def _contains_words(hay: list[str], needle: list[str]) -> bool:
+    n = len(needle)
+    return any(hay[i:i + n] == needle for i in range(len(hay) - n + 1))
 
 
 def _yes_no(v: Any) -> str | None:
@@ -355,6 +415,10 @@ def _profile_answer(label: str, profile: dict, context: dict) -> str | None:
         (r"\blinkedin\b", p.get("linkedin") or p.get("linkedin_url")),
         (r"\bgithub\b", p.get("github")),
         (r"\b(website|portfolio|personal site)\b", p.get("website") or p.get("portfolio") or p.get("github")),
+        (r"\bsponsor", _yes_no(p.get("visa_sponsorship_needed"))),
+        (r"\b(authori[sz]ed|eligible|legally (able|permitted)) to work\b|\bwork authori[sz]ation\b",
+         _yes_no(p.get("work_authorization")) or p.get("work_authorization")),
+        (r"\brelocat", _yes_no(p.get("willing_to_relocate"))),
         (r"\bcity\b", addr.get("city")),
         (r"\b(state|province|region)\b", addr.get("state")),
         (r"\b(zip|postal)\b", addr.get("zip")),
@@ -364,10 +428,6 @@ def _profile_answer(label: str, profile: dict, context: dict) -> str | None:
         (r"\b(current|most recent) (title|role|position)\b", p.get("current_role")),
         (r"\b(current|most recent) (company|employer)\b", p.get("current_company")),
         (r"\byears of (professional )?experience\b|\bhow many years\b", p.get("years_of_experience")),
-        (r"\bsponsor", _yes_no(p.get("visa_sponsorship_needed"))),
-        (r"\b(authori[sz]ed|eligible|legally (able|permitted)) to work\b|\bwork authori[sz]ation\b",
-         _yes_no(p.get("work_authorization")) or p.get("work_authorization")),
-        (r"\brelocat", _yes_no(p.get("willing_to_relocate"))),
         (r"\b(notice period|start date|when can you start|availability)\b", p.get("notice_period")),
         (r"\b(salary|compensation|pay) (expectation|requirement|range)s?\b|\bdesired (salary|pay)\b",
          (f"{sal.get('min')}" if sal.get("min") else None)),
@@ -441,7 +501,13 @@ def plan_answer(f: Field, profile: dict, qa: dict, context: dict | None = None) 
         cl = (profile or {}).get("cover_letter")
         if cl:
             return str(cl)
-    answer = answer_bank_lookup(f.label, qa) or _profile_answer(f.label, profile, context)
+    answer = answer_bank_lookup(f.label, qa)
+    if answer is None:
+        answer = _profile_answer(f.label, profile, context)
+        # A keyword rule ("relocat" -> willing_to_relocate) gives a bare Yes/No; that is no answer
+        # to "Tell us about your relocation timeline" - the agent writes those from the resume.
+        if answer in ("Yes", "No") and cat == "essay" and f.kind in ("textarea", "text"):
+            answer = None
     if answer is None and f.kind == "checkbox" and _ACCURACY_ATTEST_RE.search(f.label):
         # Every answer comes from the candidate's own profile/resume, so the
         # "information above is true/accurate" attestation is truthful. Terms,

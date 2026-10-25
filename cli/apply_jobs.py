@@ -124,6 +124,12 @@ async def save_new_qa(new_questions: dict, source_domain: str = ""):
             save_json(QA_FILE, qa)
 
 
+def _is_linkedin(url: str) -> bool:
+    from urllib.parse import urlparse
+    host = (urlparse(url).hostname or "").lower()
+    return host == "linkedin.com" or host.endswith(".linkedin.com")
+
+
 async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[str], easy_apply: bool, worker_id: int, resume_path_override: str | None = None) -> str:
     """Apply to a single job. Returns final status."""
     url = job["url"]
@@ -187,7 +193,7 @@ async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[
     ledger = RunLedger()
     apply_tools = build_apply_tools(
         ledger=ledger, profile=profile, qa=qa,
-        context={"source": "LinkedIn", "company": company, "title": title, "url": url},
+        context={"source": "LinkedIn" if _is_linkedin(url) else (job.get("source") or "Company website"), "company": company, "title": title, "url": url},
         vault=vault, account_email=agent_sensitive_data["account_email"],
         sensitive_data=agent_sensitive_data,
     )
@@ -198,14 +204,15 @@ async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[
     except Exception:
         mail_linked = False
 
-    login_preamble = (
-        f"FIRST — LOGIN CHECK:\n"
-        f"1. Go to https://www.linkedin.com/feed/ to check if you're logged into LinkedIn.\n"
-        f"   - If you see the feed/home page → logged in ✓\n"
-        f"   - If you see a login page → WAIT for user to log in manually. Check every 15 seconds (refresh). Wait up to 5 minutes.\n"
-    )
+    on_linkedin = _is_linkedin(url)
+    checks: list[str] = []
+    if on_linkedin:
+        checks.append(
+            "Go to https://www.linkedin.com/feed/ to check if you're logged into LinkedIn.\n"
+            "   - If you see the feed/home page → logged in ✓\n"
+            "   - If you see a login page → WAIT for user to log in manually. Check every 15 seconds (refresh). Wait up to 5 minutes."
+        )
     if mail_linked:
-        login_preamble += "\n"
         otp_instructions = (
             "\n\nOTP/VERIFICATION CODES: If ANY site asks for a verification code, OTP, or 2FA token:\n"
             "1. Choose the EMAIL option if given a choice\n"
@@ -214,11 +221,11 @@ async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[
             "4. NEVER open webmail (mail.google.com, outlook.com) in the browser"
         )
     else:
-        login_preamble += (
-            f"2. Open a new tab and go to https://mail.google.com/mail/u/0/#inbox to check Gmail.\n"
-            f"   - If you see the Gmail inbox (list of emails) → logged in ✓\n"
-            f"   - If you see a Google sign-in page or redirect → WAIT for user to log in manually. Check every 15 seconds. Wait up to 5 minutes.\n"
-            f"3. Close the Gmail tab and switch back to LinkedIn.\n\n"
+        checks.append(
+            "Open a new tab and go to https://mail.google.com/mail/u/0/#inbox to check Gmail.\n"
+            "   - If you see the Gmail inbox (list of emails) → logged in ✓\n"
+            "   - If you see a Google sign-in page or redirect → WAIT for user to log in manually. Check every 15 seconds. Wait up to 5 minutes.\n"
+            "   Then close the Gmail tab."
         )
         otp_instructions = (
             "\n\nOTP/VERIFICATION CODES: If ANY site asks for a verification code, OTP, or 2FA token:\n"
@@ -228,20 +235,30 @@ async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[
             "4. Copy the code, switch back to the application tab, and enter it\n"
             "5. This is NOT a blocker — always attempt to retrieve the code from Gmail before giving up"
         )
+    login_preamble = ""
+    if checks:
+        login_preamble = "FIRST — LOGIN CHECK:\n" + "\n".join(
+            f"{i}. {c}" for i, c in enumerate(checks, 1)) + "\n\n"
+    goto = f"Go to {url} on LinkedIn." if on_linkedin else f"Go to {url} (the employer's application page)."
 
-    if easy_apply:
+    if easy_apply and on_linkedin:
         apply_instructions = (
             f"{login_preamble}"
-            f"THEN: Go to {url} on LinkedIn. Click Easy Apply and complete the application. "
+            f"THEN: {goto} Click Easy Apply and complete the application. "
             f"Use resume at {resume_path}. Answer every question from the candidate profile (rules below). "
             f"Use submit_form_guarded for the Next/Review/Submit buttons."
             f"{otp_instructions}"
         )
     else:
+        landing = (
+            "Click Apply and follow through to the external application page. "
+            if on_linkedin else "Complete the application on this site. "
+        )
         apply_instructions = (
             f"{login_preamble}"
-            f"THEN: Go to {url} on LinkedIn. Click Apply and follow through to the external application page. "
-            f"Use resume at {resume_path}. Answer every question from the candidate profile (rules below).\n\n"
+            f"THEN: {goto} {landing}"
+            f"Use resume at {resume_path}. Answer every question from the candidate profile (rules below). "
+            f"Use submit_form_guarded for the Next/Review/Submit buttons.\n\n"
             f"NAVIGATING EXTERNAL SITES:\n"
             f"- The LinkedIn 'Apply' button often opens a company careers page, NOT the application form directly.\n"
             f"- You MUST explore the landing page: look for 'Apply Now', 'Submit Application', or similar buttons.\n"

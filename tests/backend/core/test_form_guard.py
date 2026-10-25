@@ -53,3 +53,29 @@ def test_accuracy_attestation_ticked_but_not_consents():
     assert fg.plan_answer(F("I certify the information above is true", "checkbox"), {}, {}) == "true"
     assert fg.plan_answer(F("I agree to the Terms of Service", "checkbox"), {}, {}) is None
     assert fg.plan_answer(F("Send me marketing emails", "checkbox"), {}, {}) is None
+
+
+# ── M8 regressions found by the mock-ATS e2e suite ───────────────────────────
+
+def test_bank_containment_is_whole_words_not_substrings():
+    qa = {"Are you open to relocation?": "Yes"}
+    assert fg.answer_bank_lookup("Location", qa) is None          # "location" is inside "relocation"
+    assert fg.answer_bank_lookup("Are you open to relocation? *", qa) == "Yes"
+    assert fg.answer_bank_lookup("Why do you want to work here", {"why do you want to work": "Because"}) == "Because"
+
+
+def test_essay_never_gets_a_bare_keyword_yes_no():
+    p = {"willing_to_relocate": True}
+    essay = fg.Field(key="f1", kind="textarea", label="Tell us about your relocation timeline")
+    assert fg.plan_answer(essay, p, {}) is None
+    radio = fg.Field(key="g:r", kind="radio", label="Are you open to relocation?",
+                     options=[{"value": "Yes", "label": "Yes"}, {"value": "No", "label": "No"}])
+    assert fg.plan_answer(radio, p, {}) == "Yes"
+
+
+def test_work_authorization_question_mentioning_country_is_not_an_address():
+    p = {"work_authorization": True, "address": {"country": "United States of America"}}
+    f = fg.Field(key="g:a", kind="radio",
+                 label="Are you legally authorized to work in the country for which you are applying? *",
+                 options=[{"value": "Yes", "label": "Yes"}, {"value": "No", "label": "No"}])
+    assert fg.plan_answer(f, p, {}) == "Yes"

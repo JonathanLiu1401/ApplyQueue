@@ -33,6 +33,7 @@ and (b) the launch/health smoke of the real `.app` bundle.
 | Schedules | `test_search_schedule.py` (24) | overlap skip, other device holds lock, sleep catch-up runs once, clock moved back, 429 backoff, expired login pauses with notice, repeated errors pause, heartbeat on long runs, merged multi-device schedule list |
 | Real apply flows: Workday / Greenhouse / Lever / Ashby / iCIMS-style mock ATS (multi-page, conditional, uploads, essays, EEO) | `tests/e2e/test_agent_apply_e2e.py`, `test_mock_ats_forms.py` | the real browser_use Agent + real Chromium + scripted LLM. Every optional question must be answered truthfully, and finish needs page proof. Captcha, unanswerable question, missing confirmation and a 500 on submit all go to a person and are never "success" |
 | Backends | `test_cli_backends.py`, `test_local_models.py`, `test_llm_factory.py` | fake Grok/Cursor/Codex/Claude CLIs (unmodified-CLI contract, no token files read); mocked APIs |
+| DST + time-zone changes | `tests/backend/core/test_schedule_dst_m8.py` (6) | spring-forward missing 02:30 runs once at 03:30 PDT; fall-back repeated 01:30 runs once, including when started inside the repeated hour; hourly jobs never double and gaps stay within 30 min to 2 h; an explicit zone ignores device TZ changes (UTC, Tokyo, New York, Chatham +12:45); "local" follows the device after a move; unknown zone falls back instead of crashing. **Bug found**: Windows has no system tz database and `tzdata` was not a dependency, so on Windows every named zone silently fell back to device-local time. Fixed with a `tzdata` dependency bundled into the sidecar, plus a frozen-binary `--self-test` (`"tzdb": true`) on every OS in Build Check |
 | Real local Ollama, small vision model | manual run on the box (§4) | |
 
 ## 3. Adversarial ("break-it") cases
@@ -74,6 +75,7 @@ and (b) the launch/health smoke of the real `.app` bundle.
 | e5d7035 | truncated settings.json crash; 2nd instance token overwrite + SIGKILL of the port holder; orphaned onefile sidecar; read-only/full data dir; zero-width titles; partial tmp on ENOSPC |
 | 1b862ca | real Tauri app WebDriver test |
 | 88e4c7f | UI e2e wait for auto-fill on slow runners (Intel Mac) |
+| 2ac9b2f | Windows: schedule time zones silently ignored (no tz database). `tzdata` bundled; DST/time-zone tests; frozen self-test checks the tz database on all OSes |
 
 ## 6. Known limitations
 
@@ -87,5 +89,4 @@ and (b) the launch/health smoke of the real `.app` bundle.
 
 - Apple-silicon arm64 run in M8 (dispatch pending).
 - Real Tauri app over WebDriver in CI (works locally on Linux up to the Welcome screen; wizard step and CI job pending). Windows msedgedriver not attempted.
-- DST / timezone-change schedule cases (clock moved back is covered; DST transitions are not).
 - Real Gmail/Outlook/GitHub accounts (by design: mocks only).

@@ -169,3 +169,16 @@ def _friendly_llm_error(message: str, status_code=None) -> str:
 
     # Fall back to the raw provider message so the user still sees something useful.
     return message or "LLM request failed."
+
+
+def agent_timeouts(llm) -> dict:
+    """browser_use Agent timeouts for this model.
+
+    browser_use 0.13 takes ``llm_timeout`` / ``step_timeout`` (an older ``llm_call_timeout``
+    keyword is silently ignored, which left every model on the 75 s default). A local
+    Ollama model on a CPU-only machine needs minutes per step, so it gets far more room.
+    """
+    name = type(llm).__name__.lower()
+    if "ollama" in name:
+        return {"llm_timeout": 900, "step_timeout": 1200}
+    return {"llm_timeout": 300, "step_timeout": 420}

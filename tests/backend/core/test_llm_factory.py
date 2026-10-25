@@ -384,3 +384,15 @@ async def test_test_connection_generic_error_passthrough():
 
     with pytest.raises(RuntimeError, match="totally unexpected boom"):
         await llm_factory.test_connection(_FakeLLM(bad))
+
+
+def test_agent_timeouts_are_real_browser_use_settings():
+    """llm_call_timeout was silently ignored (75 s default) and killed every CPU-only local step."""
+    from browser_use import Agent
+    from browser_use.llm import ChatOllama, ChatOpenAI
+    from core.llm_factory import agent_timeouts
+
+    for llm, want in ((ChatOllama(model="qwen3-vl:2b"), 900), (ChatOpenAI(model="gpt-4o", api_key="x"), 300)):
+        a = Agent(task="t", llm=llm, use_judge=False, **agent_timeouts(llm))
+        assert a.settings.llm_timeout == want
+        assert a.settings.step_timeout > a.settings.llm_timeout

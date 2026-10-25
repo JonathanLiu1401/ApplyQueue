@@ -34,6 +34,7 @@ try:
     from core.agent_logger import on_step as _agent_on_step, on_done as _agent_on_done, log_run_start as _agent_log_start
     from core import job_status as js
     from core.apply_policy import apply_policy_text
+    from core.llm_factory import agent_timeouts
     from core.credential_vault import CredentialVault
     from core.outcome import decide_outcome
 except ImportError:
@@ -51,6 +52,7 @@ except ImportError:
     from backend.core.agent_logger import on_step as _agent_on_step, on_done as _agent_on_done, log_run_start as _agent_log_start
     from backend.core import job_status as js
     from backend.core.apply_policy import apply_policy_text
+    from backend.core.llm_factory import agent_timeouts
     from backend.core.credential_vault import CredentialVault
     from backend.core.outcome import decide_outcome
 
@@ -333,7 +335,7 @@ async def _apply_claimed(job, profile, qa, applied_labels, easy_apply, worker_id
         ),
         llm=llm,
         use_vision=True,
-        llm_call_timeout=300,  # 5 minutes per step
+        **agent_timeouts(llm),  # llm_call_timeout was ignored by browser_use 0.13 (75 s default)
         max_failures=10,
         loop_detection_enabled=True,
         loop_detection_window=5,

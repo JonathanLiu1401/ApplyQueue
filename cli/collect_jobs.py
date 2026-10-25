@@ -28,6 +28,7 @@ try:
         read_jobs, write_jobs, update_job,
     )
     from core.agent_logger import on_step as _agent_on_step, on_done as _agent_on_done, log_run_start as _agent_log_start
+    from core.llm_factory import agent_timeouts
 except ImportError:
     import backend.core.shared_config as config
     from backend.core.shared_config import (
@@ -36,6 +37,7 @@ except ImportError:
         read_jobs, write_jobs, update_job,
     )
     from backend.core.agent_logger import on_step as _agent_on_step, on_done as _agent_on_done, log_run_start as _agent_log_start
+    from backend.core.llm_factory import agent_timeouts
 
 # Imported after `core` so core/privacy_env.py has disabled browser-use telemetry first.
 from browser_use import Agent, BrowserSession  # noqa: E402
@@ -207,7 +209,7 @@ async def collect_for_title(title: str, existing_jobs: dict, profile: dict, max_
         ),
         llm=llm,
         use_vision=True,
-        llm_call_timeout=300,  # 5 minutes per step
+        **agent_timeouts(llm),  # llm_call_timeout was ignored by browser_use 0.13 (75 s default)
         browser_session=browser,
         max_failures=10,
         register_new_step_callback=on_step,

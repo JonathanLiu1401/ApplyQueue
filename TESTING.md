@@ -1,6 +1,6 @@
 # Testing Guide
 
-LangHire has two test suites — a **Python/pytest** suite for the FastAPI backend and a
+ApplyQueue has two test suites — a **Python/pytest** suite for the FastAPI backend and a
 **Vitest + React Testing Library** suite for the React frontend. Both produce coverage reports
 and run in CI (`.github/workflows/test.yml`) on every push/PR across macOS, Linux, and Windows.
 
@@ -42,7 +42,7 @@ src/test/setup.ts               # global Vitest setup (mocks Tauri, jest-dom mat
 - Configuration lives in `pyproject.toml` (`[tool.pytest.ini_options]`, `[tool.coverage.*]`).
 - `asyncio_mode = "auto"` — `async def test_*` functions run without extra decorators.
 - The **`data_dir` fixture** (in `tests/conftest.py`) redirects the OS app-data directory into a
-  per-test temp `HOME`, so tests never touch your real `~/.config/langhire`. Use it for anything
+  per-test temp `HOME`, so tests never touch your real `~/.config/applyqueue`. Use it for anything
   that reads/writes settings, profile, jobs, or the memory DB.
 - **No network, no AWS, no real browser.** External calls (LLMs, boto3, subprocess, Playwright)
   are mocked with `unittest.mock` / `monkeypatch`.

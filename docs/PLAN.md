@@ -23,7 +23,7 @@ repos are public); LangHire's history was merged into this private repo instead.
 ### 2.1 Architecture
 - **Tauri v2 shell** (`src-tauri/`, ~100 lines of Rust): resolves the data dir
   (`~/.config/langhire`, `~/Library/Application Support/langhire`, `%APPDATA%\langhire`), spawns the
-  PyInstaller sidecar `binaries/langhire-backend-<target>`, kills it on exit.
+  PyInstaller sidecar `binaries/applyqueue-backend-<target>`, kills it on exit.
 - **UI** (`src/`): React 19 + Vite + TS, react-router, i18next (13 locales), pages for
   Dashboard, Setup wizard, Profile, Jobs, Apply, Memory, QA, Logs, Settings, Feedback.
 - **Sidecar** (`backend/main.py`, ~2.1k lines FastAPI): per-launch bearer token
@@ -102,8 +102,8 @@ SQLite stays a local cache.
   Chromium, integration test with an OpenRouter key, backend binary + binary integration test).
 - Licensing finding: **PyMuPDF (`fitz`) is AGPL-3.0** (or Artifex commercial) and is bundled
   into the sidecar binary, along with `pymupdf4llm`/`pymupdf-layout` (no license metadata).
-  Distributing that binary under MIT terms is a problem. M1 replaces it (e.g. `pypdf`, BSD)
-  before any public binary.
+  Distributing that binary under MIT terms is a problem. **Replaced in `58108e7`** by
+  `pdfminer.six` (MIT, text + layout) and ReportLab (BSD, PDF output) in `backend/core/pdf_io.py`.
 
 ### 2.8 Tests (run on the box, Linux x64, 2026-10-24)
 - `uv run pytest`: **all pass** (~590 tests across core, memory, resume, sources, API).
@@ -163,12 +163,28 @@ SQLite stays a local cache.
 
 | Vendor | Official CLI, headless + MCP | Subscription use by a third-party app driving the CLI | Verdict |
 |---|---|---|---|
-| **Claude Code** (Anthropic) | `claude -p "<task>" --mcp-config aq.json --allowedTools "mcp__applyqueue__*" --output-format stream-json --verbose` ([headless](https://code.claude.com/docs/en/headless)); Agent SDK ([docs](https://code.claude.com/docs/en/agent-sdk/)) | [Legal & compliance](https://code.claude.com/docs/en/legal-and-compliance): third-party developers may not offer claude.ai login or route requests through Free/Pro/Max credentials for their users, and may not collect or store tokens. The same page says this does not prevent an end user from signing in to the **unmodified** Claude Code binary with their own subscription. The [Agent SDK + plan](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) article (updated 2026-10-07) says `claude -p` and third-party apps draw on the plan's limits. See also [sdk-ts#382](https://github.com/anthropics/claude-agent-sdk-typescript/issues/382). | **Gray / restricted.** Default to an Anthropic API key. Offer "use my installed Claude Code" as an opt-in with a warning: the user installs and logs in to the unmodified binary themselves; we never bundle it, never offer a "Sign in with Claude" button, never touch its tokens. **Needs Art's decision.** |
+| **Claude Code** (Anthropic) | `claude -p "<task>" --mcp-config aq.json --allowedTools "mcp__applyqueue__*" --output-format stream-json --verbose` ([headless](https://code.claude.com/docs/en/headless)); Agent SDK ([docs](https://code.claude.com/docs/en/agent-sdk/)) | [Legal & compliance](https://code.claude.com/docs/en/legal-and-compliance): third-party developers may not offer claude.ai login or route requests through Free/Pro/Max credentials for their users, and may not collect or store tokens. The same page says this does not prevent an end user from signing in to the **unmodified** Claude Code binary with their own subscription. The [Agent SDK + plan](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) article (updated 2026-10-07) says `claude -p` and third-party apps draw on the plan's limits. See also [sdk-ts#382](https://github.com/anthropics/claude-agent-sdk-typescript/issues/382). | **Allowed as opt-in (Art, 2026-10-25).** API key stays the default. "Use my installed Claude Code" is off until the user enables it after a clear terms warning; it runs the **unmodified** `claude` CLI under the user's own login only. We never bundle it, never offer a "Sign in with Claude" button, and never extract, store, or route its subscription token. |
 | **Grok Build** (xAI) | `grok -p "<task>" --output-format streaming-json --always-approve --no-auto-update`; `grok mcp add …`; `grok agent stdio` (ACP) ([CLI reference](https://docs.x.ai/build/cli/reference), [headless](https://docs.x.ai/build/cli/headless-scripting), [launch post](https://x.ai/news/grok-build-cli)) | SuperGrok / X Premium+ via `grok login` / `--device-auth`, or `XAI_API_KEY`. xAI promotes headless/ACP for scripts and "agent orchestration apps". [ToS](https://x.ai/legal/terms-of-service) (2026-10-12) forbids sharing credentials or accounts; the [AUP](https://x.ai/legal/acceptable-use-policy) forbids "using bots to access" the service in the sense of copying or reverse-engineering, circumventing rate limits, and reselling. | **Allowed** via the official CLI/ACP under the user's own login. One user, their own machine, respect rate limits. |
 | **Grok Bot** | n/a (the bot runs ApplyQueue itself) | Setup prompt + private sync repo; the bot uses its own sign-in and vault. | **Allowed** (recommended path). |
 | **Cursor CLI** | `agent -p "<task>" --output-format stream-json --force --trust --approve-mcps` with `.cursor/mcp.json`; `agent acp` ([headless](https://cursor.com/docs/cli/headless), [parameters](https://cursor.com/docs/cli/reference/parameters), [auth](https://cursor.com/docs/cli/reference/authentication), [MCP](https://cursor.com/docs/mcp)) | `agent login` (the user's account) or `CURSOR_API_KEY`. [ToS](https://cursor.com/terms-of-service) §1.5: no reverse engineering, scraping, or reselling. Cursor staff on the [forum](https://forum.cursor.com/t/inquiry-regarding-official-api-or-commercial-license-for-using-cursors-engine-as-a-backend-component/165063/5) (2026-07-10): headless CLI/SDK as a backend is "supported and intended"; just don't resell or give third parties access under your account. Unofficial proxies to private endpoints are not OK ([thread](https://forum.cursor.com/t/does-using-oh-my-pi-s-cursor-provider-or-an-openai-compatible-proxy-to-the-same-endpoints-violate-cursor-s-tos/167778)). | **Allowed** via the official CLI under the user's own account. |
-| **ChatGPT / Codex** (OpenAI) | `codex exec --json "<task>"` with `[mcp_servers.applyqueue]` in `config.toml` ([non-interactive](https://learn.chatgpt.com/docs/non-interactive-mode)); `codex app-server --listen stdio://` ([app-server](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server)) | `codex exec` under the user's own `codex login` is the official CLI used by its owner. Separately, [Sign in with ChatGPT terms](https://openai.com/policies/sign-in-with-chatgpt-terms/) (2026-09-29) explicitly allow open-source local apps to use a ChatGPT plan through OpenAI's SIWC flow. Conditions: the app keeps its own identity, tokens come only from OpenAI's flow and stay local, requests run from the user's runtime, the user gives express consent, there is no charge, and no pooling. Apps must **not** reuse Codex CLI credentials. | **Allowed.** v1: spawn `codex exec` (we hold no token). Later option: register SIWC (our app would hold a locally stored OpenAI-issued token; sanctioned, but it departs from "never hold tokens", so it needs Art's OK). |
+| **ChatGPT / Codex** (OpenAI) | `codex exec --json "<task>"` with `[mcp_servers.applyqueue]` in `config.toml` ([non-interactive](https://learn.chatgpt.com/docs/non-interactive-mode)); `codex app-server --listen stdio://` ([app-server](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server)) | `codex exec` under the user's own `codex login` is the official CLI used by its owner. Separately, [Sign in with ChatGPT terms](https://openai.com/policies/sign-in-with-chatgpt-terms/) (2026-09-29) explicitly allow open-source local apps to use a ChatGPT plan through OpenAI's SIWC flow. Conditions: the app keeps its own identity, tokens come only from OpenAI's flow and stay local, requests run from the user's runtime, the user gives express consent, there is no charge, and no pooling. Apps must **not** reuse Codex CLI credentials. | **Allowed, including "Sign in with ChatGPT" (Art, 2026-10-25).** API key stays the default. SIWC tokens come only from OpenAI's flow and stay on the user's device (OS keychain or the Codex CLI's own store); never in the sync repo, the public repo, logs, or telemetry. A guard rejects Codex/ChatGPT tokens in sync-repo writes (see §3.2). |
 | **Gemini** (Google) | Gemini CLI `gemini -p` ([auth](https://geminicli.com/docs/get-started/authentication/)); for consumer plans it was replaced by **Antigravity CLI** `agy -p --output-format stream-json` on 2026-06-18 ([Google blog](https://developers.googleblog.com/en/an-important-update-transitioning-gemini-cli-to-antigravity-cli/)) | [Gemini CLI ToS/privacy](https://geminicli.com/docs/resources/tos-privacy/) and the [FAQ](https://geminicli.com/docs/resources/faq/) say third-party software using Gemini CLI OAuth violates the terms and risks suspension ([discussion](https://github.com/google-gemini/gemini-cli/discussions/22970)); headless docs recommend API keys. A Google AI forum answer ([thread](https://discuss.ai.google.dev/t/is-it-allowed-for-an-open-source-tool-to-call-the-official-agy-cli-in-headless-mode/183429)) says spawning the unmodified `agy` locally is OK if tokens are never touched. That answer came from a community "Regular", not confirmed Google staff, and it recommends AI Studio/Vertex keys for automation. | **Forbidden** for Gemini CLI OAuth: use a **Gemini API key / Vertex only** (already in LangHire). `agy` subscription driving stays **off** until Google confirms officially. |
+
+### 3.2 Subscription decisions (Art, 2026-10-25)
+
+1. **Claude Code: allowed as opt-in.** Before it can be enabled, the UI shows a terms warning
+   (link to Anthropic's legal & compliance page; the user's own subscription and limits; the
+   user is responsible for complying). ApplyQueue runs the unmodified `claude` CLI that the user
+   installed and logged in to; it never extracts, stores, proxies, or routes the subscription
+   token, and never offers its own Claude login. The Anthropic API key remains the default.
+2. **Codex: "Sign in with ChatGPT" allowed.** It uses OpenAI's own SIWC / `codex login` flow.
+   The token stays on the user's device only (OS keychain or the Codex CLI's own credential
+   store) and is never written to the private sync repo, the public repo, logs, or telemetry.
+   ApplyQueue does not reuse Codex CLI credentials in its own HTTP calls. Guard: a test plus a
+   scan rule make every sync-repo write reject Codex/ChatGPT/OpenAI OAuth tokens (e.g. `auth.json`
+   content, JWT-shaped `access_token`/`refresh_token`/`id_token`, and `sk-` keys). It ships with
+   the M3 adapter and is enforced again by the M5 sync writer and the privacy scan. The OpenAI
+   API key remains the default.
 
 Common rule for all vendors: one user, on their own machine and their own account. No credential
 sharing, pooling, reselling, or proxying, and no reading of CLI token files. Respect plan limits:
@@ -178,15 +194,44 @@ the default is 1 concurrent job per CLI backend, with backoff on rate-limit erro
 
 | # | Milestone | Exit criteria |
 |---|---|---|
-| **M1** | **Fork + audit + builds** | LangHire history merged; scaffold archived; attribution/license; privacy + license CI green; this audit; rename to ApplyQueue (product name, bundle id `org.applyqueue.desktop`, data dir with migration from `langhire`, sidecar name); telemetry off by default; fix missing `it/zh` translations; CSP tightened; PyMuPDF replaced; app + sidecar build on Linux/Windows/macOS in CI (path-filtered; macOS manual/release only). |
-| **M2** | **Answer every question + fix #89** | Remove "skip after 5 steps"; `form.unanswered_fields()` must be empty before submit; every question (optional included) is answered truthfully from profile/QA, EEO may use "decline to self-identify", and unknowns go to `ask_user` instead of being invented. `applied` requires a confirmation page + no failing submit POST (CDP) + an email proof when available; otherwise `submitted_unverified`/`failed`. Generated ATS passwords are stored before use. Fixture ATS pages + tests. |
-| **M3** | **Subscription CLI backends** | MCP server (`browser/form/email/queue`), adapters for Grok Build, Cursor CLI, Codex `exec`, Claude Code (opt-in, gray, warning), each with an install/login check and stream-json parsing; Grok Bot setup prompt; Gemini = API key only; API keys + Ollama untouched. |
+| **M1** | **Fork + audit + builds** | LangHire history merged; scaffold archived; attribution/license; privacy + license CI green; this audit; rename to ApplyQueue (product name, bundle id `org.applyqueue.desktop`, data dir with migration from `langhire`, sidecar name); telemetry off by default; fix missing `it/zh` translations; CSP tightened; PyMuPDF replaced; app + sidecar build on Linux/Windows/macOS in CI (path-filtered; macOS ARM manual/release only; **Intel macOS on every code push, required** — see §4.2). |
+| **M2** | **Answer every question + fix #89** | Remove "skip after 5 steps"; `form.unanswered_fields()` must be empty before submit; every question (optional included) is answered truthfully from profile/QA, EEO may use "decline to self-identify", and unknowns go to `ask_user` instead of being invented. `applied` requires a confirmation page + no failing submit POST (CDP) + an email proof when available; otherwise `submitted_unconfirmed`/`needs_human`/`failed`. Generated ATS passwords are stored before use. Fixture ATS pages + tests. |
+| **M3** | **Subscription CLI backends** | MCP server (`browser/form/email/queue`), adapters for Grok Build, Cursor CLI, Codex (`exec` + "Sign in with ChatGPT", token kept in the OS keychain / CLI store only, plus a sync-write guard test rejecting Codex/ChatGPT tokens), Claude Code (opt-in behind a terms warning, unmodified CLI under the user's own login, token never touched), each with an install/login check and stream-json parsing; API keys stay the default for Claude and Codex; Grok Bot setup prompt; Gemini = API key only; API keys + Ollama untouched. |
 | **M4** | **Gmail + Outlook confirmation tracking** | Gmail API + Microsoft Graph OAuth (user's own consent, local tokens for *email* only); OTP retrieval tool; confirmation matching + labels (`ApplyQueue/Applied`, `…/Rejected`, `…/Interview`); weekly one-click Google re-auth reminder; recruiter emails off by default, drafts only. |
-| **M5** | **Private GitHub sync repo** | Queue/ledger/QA/credentials/sessions sync via the user's own private repo; app verifies `private=true` via the GitHub API and **refuses** public repos (and re-checks before each push); claim locks across machines/agents; encryption as an optional setting (not approved yet). |
+| **M5** | **Private GitHub sync repo** | Queue/ledger/QA/credentials/sessions sync via the user's own private repo; app verifies `private=true` via the GitHub API and **refuses** public repos (and re-checks before each push); sync writes reject Codex/ChatGPT and other subscription OAuth tokens (§3.2); claim locks across machines/agents; encryption as an optional setting (not approved yet). |
 | **M6** | **Local models as headline** | Detect Ollama / LM Studio / llama.cpp / vLLM; hardware probe (VRAM/RAM/Apple silicon); vision-model recommender; one-click pull with progress; overnight mode. |
 | **M7** | **LoopCV-style searches** | Saved searches with schedules and stats (found/applied/verified/replies), review-first vs automatic mode per search, user-defined job domains (starter packs in `docs/examples/packs/`). |
-| **M8** | **Full e2e + break-it suite** | Fixture ATS sites + real-browser e2e on macOS/Windows/Linux, chaos cases (500 on submit, CAPTCHAs, expired sessions, OTP, required/optional fields, crash/resume, duplicate claims, public-repo refusal); `TEST_REPORT.md`. |
+| **M8** | **Full e2e + break-it suite** | Fixture ATS sites + real-browser e2e on **macOS Apple silicon, macOS Intel (x86_64, `macos-15-intel`), Windows x64 and Linux x64**, run against the *packaged* app of each platform, chaos cases (500 on submit, CAPTCHAs, expired sessions, OTP, required/optional fields, crash/resume, duplicate claims, public-repo refusal); `TEST_REPORT.md` (plan in §4.3). |
 | **Gate** | **Publish gate** | Art approves `TEST_REPORT.md`; final privacy scan; only then: visibility change, releases, domains/npm. Nothing is published before this. |
+
+### 4.2 Platform support and required checks (Art, 2026-10-25)
+**Intel Macs (x86_64) are a hard requirement**, equal to Apple silicon, Windows and Linux.
+- Dependencies: every Python wheel in `uv.lock` must exist for `macosx_*_x86_64` (or universal2).
+  `scripts/check-macos-x64-wheels.py` enforces it on Linux CI and on the Intel job. Known pin:
+  `cryptography>=48.0.1,<49` (49+ dropped macOS x86_64 wheels) via `[tool.uv] constraint-dependencies`.
+  PyMuPDF (whose `onnxruntime` dependency had no Intel wheel) is gone.
+- Sidecar: PyInstaller cannot cross-compile, so the x86_64 sidecar is built natively on
+  `macos-15-intel` (`build-backend.sh` refuses a non-native Darwin target and prints `lipo` archs).
+  The release workflow builds the Intel bundle on `macos-15-intel` too.
+- CI job **"Intel Mac (test, bundle, launch /health)"** (`test.yml`, every code-path push/PR):
+  wheel check → `uv sync` with an x86_64 assert → pytest → x86_64 sidecar → frozen
+  `--self-test` (PDF libs + arch) → `tauri build --target x86_64-apple-darwin` (.app + .dmg) →
+  `scripts/smoke-macos-app.sh` (every Mach-O is x86_64, the packaged app launches and
+  `127.0.0.1:8743/health` answers) → unsigned .dmg artifact kept 3 days.
+- Required check: the **"Required checks"** aggregator job needs `test` (Linux/Windows) and
+  `intel-mac`, and branch protection on `main` requires that one context (no review requirement,
+  admins not enforced so fast-forward pushes from the owner still work, force-push and deletion
+  disabled). Docs-only pushes skip `test.yml` via path filters, so they are not blocked.
+- Cost: macOS minutes are 10x; the Intel job is the only per-push macOS job (concurrency cancels
+  superseded runs). Apple-silicon macOS stays on manual dispatch (`run_macos=true`) and releases.
+
+### 4.3 TEST_REPORT.md plan (M8)
+One section per platform: macOS Apple silicon, **macOS Intel**, Windows x64, Linux x64. Each lists
+the packaged artifact tested (name, version, arch from `lipo`/`file`), install + first launch +
+`/health`, data-folder migration from `langhire`, the fixture-ATS e2e results (answer-every-question
+including optional/EEO, needs-human path, #89 status transitions, per-site passwords), the
+break-it cases, and links to the CI runs and artifacts. Intel results must come from an x86_64
+runner or machine, never from Rosetta on Apple silicon.
 
 ### 4.1 Candidate upstream PRs to LangHire (NOT opened)
 Only with Art's OK via Job Manager:
@@ -202,15 +247,30 @@ M1 checklist (updated with each M1 commit):
 - [x] Privacy + license CI adapted; test.yml path filters; macOS manual-only.
 - [x] Local Linux build: `npm run build`, pytest, vitest (8 known i18n failures).
 - [x] Sidecar binary + `tauri build` (deb/AppImage) on Linux; app + sidecar smoke-run under xvfb.
-- [ ] Rename to ApplyQueue (identifier, data-dir migration, sidecar name).
+- [x] Rename to ApplyQueue (identifier, data-dir migration, sidecar name) — done in M2.
 - [x] CI app builds (`build-check.yml`): Linux + Windows on path-filtered push/PR, macOS ARM64 on
   manual dispatch.
 - [x] i18n: `src/locales/*/jobs.json` un-ignored; it/zh `jobs.json` added (vitest parity passes).
 - [x] `uv.lock` committed (CI `--frozen`); Dependabot monthly + grouped (it came with upstream).
 - [x] CI green: Linux + Windows on push; macOS ARM64 build + tests via dispatch.
-- [ ] macOS x64 blocked: `pymupdf` 2.0 pulls `onnxruntime` 1.31, which has no macOS x86_64 wheel
-  (upstream's macOS-x64 release target is affected too). It's fixed by the PyMuPDF replacement (M2).
-- [ ] Rolled to M2: telemetry off by default; CSP; PyMuPDF replacement; rename (above).
+- [x] macOS x64 unblocked (`58108e7`): PyMuPDF replaced, cryptography pinned <49, Intel job required (§4.2).
+- [x] Rolled to M2 and done there: telemetry off by default; CSP; PyMuPDF replacement; rename (above).
+
+### 5.1 M2 status
+- [x] PyMuPDF → pdfminer.six + ReportLab; Intel macOS build/test/bundle/launch in CI (§4.2).
+- [x] Rename to ApplyQueue (`org.applyqueue.desktop`, `applyqueue-backend`, data folder migrated
+  from `langhire` on first start).
+- [x] Telemetry off by default (opt-in in Settings); stricter CSP; feedback form needs consent.
+- [x] Answer every question: upstream's "skip after 5 steps" rule removed; `form_guard` scans every
+  field (optional included), fills from profile/QA with retry strategies (direct → search → typing),
+  EEO falls back to the decline option; `submit_form_guarded` refuses Next/Submit while anything is
+  blank; impossible fields go to the ledger as `needs_human`. Mock-form Playwright test.
+- [x] #89: statuses `submitted_unconfirmed` (page confirmation read by our code) / `confirmed`
+  (page + email; email hook `/jobs/confirm-email` for M4) / `needs_human` / `failed`; agent
+  self-report alone never counts; legacy `applied` rows migrated.
+- [x] Hard-coded `JobApp2026!` removed: per-site generated passwords in a local 0600 vault
+  (`<data>/vault/site_credentials.json`); the old shared password is only a sign-in fallback.
+  Sync repo storage comes in M5.
 
 ## 6. Guardrails (unchanged)
 Private repo only; no GitHub fork; no upstream PRs, publishing, domains, or npm names without

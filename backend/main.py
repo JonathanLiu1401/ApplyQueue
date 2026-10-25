@@ -2,6 +2,7 @@
 Python backend for the ApplyQueue desktop app.
 Runs as a local FastAPI server (sidecar process launched by Tauri).
 """
+import asyncio
 import json
 import signal
 import subprocess
@@ -873,8 +874,8 @@ async def remove_resume(resume_id: str):
 def _resume_text(path: str) -> str:
     p = Path(path)
     if p.suffix.lower() == ".pdf":
-        from core.pdf_io import extract_text
-        return extract_text(p)
+        from core.pdf_io import extract_resume_text
+        return extract_resume_text(p)
     if p.suffix.lower() == ".docx":
         import zipfile
         import re as _re
@@ -897,7 +898,7 @@ async def ats_check(body: dict):
     if not desc and body.get("job_url"):
         desc = (jobs_store.get_job(str(body["job_url"])) or {}).get("description") or ""
     try:
-        text = _resume_text(resume["path"])
+        text = await asyncio.to_thread(_resume_text, resume["path"])
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not read the resume: {e}")
     return {"success": True, "resume_id": resume["id"], **ats.check(text, desc)}
@@ -2489,10 +2490,16 @@ async def parse_resume_to_profile():
         return {"success": False, "message": "Resume must be in your home folder, a temp folder or an external drive."}
 
     try:
-        from core.pdf_io import extract_text
-        resume_text = extract_text(resume_file).strip()
+        try:
+            from core.pdf_io import extract_resume_text, NO_TEXT_MESSAGE, PdfTooLarge
+        except ImportError:
+            from backend.core.pdf_io import extract_resume_text, NO_TEXT_MESSAGE, PdfTooLarge
+        # In a worker thread: pdfminer on a big file would otherwise freeze every other request.
+        resume_text = (await asyncio.to_thread(extract_resume_text, resume_file)).strip()
         if not resume_text:
-            return {"success": False, "message": "Could not extract any text from the resume PDF."}
+            return {"success": False, "message": NO_TEXT_MESSAGE}
+    except PdfTooLarge as e:
+        return {"success": False, "message": str(e)}
     except Exception as e:
         return {"success": False, "message": f"Failed to read resume PDF: {e}"}
 

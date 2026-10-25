@@ -134,6 +134,14 @@ def _safe_log_name(company: str, title: str) -> str:
     return name[:80]
 
 
+def _memory_store_or_none(worker_id=0):
+    try:
+        return get_memory_store()
+    except Exception as e:
+        print(f"    ⚠️  [W{worker_id}] Memory store unavailable (non-fatal): {e}")
+        return None
+
+
 def _is_linkedin(url: str) -> bool:
     from urllib.parse import urlparse
     host = (urlparse(url).hostname or "").lower()
@@ -189,12 +197,20 @@ async def _apply_claimed(job, profile, qa, applied_labels, easy_apply, worker_id
     llm = config.get_llm()
     # Use the shared browser profile in OS data dir (same as login endpoint)
     browser = BrowserSession(user_data_dir=str(BROWSER_PROFILE_DIR), chromium_sandbox=(sys.platform != "linux"))
-    mem_store = get_memory_store()
-    # Count memories injected for metrics tracking
-    domain = mem_store.extract_domain(url)
-    memories_before = mem_store.get_domain_memories(url, limit=50)
-    memories_injected_count = len(memories_before) if memories_before else 0
-    memory = build_memory_context(profile, qa, applied_labels, job_url=url)
+    # memory_store.db is optional context: locked by another process past the busy timeout, or
+    # unreadable, must not stop (or, after the run, misreport) an application.
+    mem_store = _memory_store_or_none(worker_id)
+    domain = ""
+    memories_injected_count = 0
+    try:
+        domain = mem_store.extract_domain(url) if mem_store else ""
+        memories_before = mem_store.get_domain_memories(url, limit=50) if mem_store else None
+        memories_injected_count = len(memories_before) if memories_before else 0
+        memory = build_memory_context(profile, qa, applied_labels, job_url=url)
+    except Exception as mem_err:
+        print(f"    ⚠️  [W{worker_id}] Memory store unavailable (non-fatal): {mem_err}")
+        mem_store = None
+        memory = build_memory_context(profile, qa, applied_labels, job_url=None)
     run_started_at = datetime.now(timezone.utc)
 
     resume_path = resume_path_override or RESUME_PATH
@@ -382,14 +398,22 @@ async def _apply_claimed(job, profile, qa, applied_labels, easy_apply, worker_id
         success = outcome.status in js.SUBMITTED_STATUSES
 
         # ── Memory extraction (self-learning) ─────────────────────────────
-        mem_store = get_memory_store()
-        # 1. Marker-based: extract @@LEARNING tags the agent emitted
-        marker_learnings = extract_learnings_from_markers(result)
-        if marker_learnings:
-            store_learnings(mem_store, marker_learnings, url, success)
-        # 2. LLM-based: use the configured LLM to summarise the run into procedural learnings
-        llm_learnings = []
+        # Everything from here to the status write is best-effort: the outcome is already
+        # decided, and a memory/metrics failure must never turn a submission into "failed".
+        marker_learnings, llm_learnings = [], []
         try:
+            mem_store = mem_store or _memory_store_or_none(worker_id)
+            # 1. Marker-based: extract @@LEARNING tags the agent emitted
+            marker_learnings = extract_learnings_from_markers(result)
+            if marker_learnings and mem_store:
+                store_learnings(mem_store, marker_learnings, url, success)
+        except Exception as mem_err:
+            print(f"    ⚠️  [W{worker_id}] Memory store failed (non-fatal): {mem_err}")
+            mem_store = None
+        # 2. LLM-based: use the configured LLM to summarise the run into procedural learnings
+        try:
+            if mem_store is None:
+                raise RuntimeError("memory store unavailable")
             def _llm_call(prompt):
                 """Use the user's configured LLM for memory extraction."""
                 import asyncio
@@ -416,7 +440,7 @@ async def _apply_claimed(job, profile, qa, applied_labels, easy_apply, worker_id
         try:
             MetricsStore().record_run(
                 job_url=url, job_title=title, company=company,
-                website_domain=domain, ats_platform=mem_store.detect_ats_platform(domain),
+                website_domain=domain, ats_platform=(mem_store.detect_ats_platform(domain) if mem_store else None),
                 success=success, started_at=run_started_at, finished_at=run_finished_at,
                 step_count=len(result.history),
                 memories_injected=memories_injected_count,

@@ -34,9 +34,32 @@ def text_length(text: str, fontsize: float, font: str = "helv") -> float:
     return stringWidth(text, font_name(font), fontsize)
 
 
-def extract_text(path: str | Path) -> str:
-    """All text of the PDF, pages concatenated in reading order."""
-    return _pm_extract_text(str(path)) or ""
+# A resume is a few pages; a 2000-page or 200 MB "resume" (wrong file picked) must not pin
+# the CPU for minutes. Callers that need text read at most this many pages.
+RESUME_MAX_PAGES = 20
+RESUME_MAX_BYTES = 50 * 1024 * 1024
+
+
+class PdfTooLarge(ValueError):
+    pass
+
+
+def extract_text(path: str | Path, max_pages: int = 0) -> str:
+    """Text of the PDF (all pages, or the first ``max_pages``), in reading order."""
+    return _pm_extract_text(str(path), maxpages=max_pages) or ""
+
+
+def extract_resume_text(path: str | Path) -> str:
+    """Text of a resume PDF, bounded in size and pages. Raises PdfTooLarge for a huge file."""
+    size = Path(path).stat().st_size
+    if size > RESUME_MAX_BYTES:
+        raise PdfTooLarge(f"The PDF is {size // (1024 * 1024)} MB; a resume should be under "
+                          f"{RESUME_MAX_BYTES // (1024 * 1024)} MB. Pick the right file or export a smaller one.")
+    return extract_text(path, max_pages=RESUME_MAX_PAGES)
+
+
+NO_TEXT_MESSAGE = ("No text could be read from this PDF. It looks like a scanned or image-only file; "
+                   "export your resume as a text PDF (Save as PDF from Word or Google Docs) so forms can use it.")
 
 
 @dataclass

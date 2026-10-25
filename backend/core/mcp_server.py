@@ -380,10 +380,10 @@ class ApplyQueueTools:
             if resume and Path(resume).is_file():
                 try:
                     try:
-                        from core.pdf_io import extract_text
+                        from core.pdf_io import extract_resume_text
                     except ImportError:  # pragma: no cover
-                        from backend.core.pdf_io import extract_text
-                    resume_text = extract_text(resume)[:12000]
+                        from backend.core.pdf_io import extract_resume_text
+                    resume_text = extract_resume_text(resume)[:12000]
                 except Exception:
                     resume_text = ""
             qa = self._qa()

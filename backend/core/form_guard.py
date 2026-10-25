@@ -58,6 +58,19 @@ SCAN_JS = r"""() => {
     return false;
   };
   const clean = (t) => (t || '').replace(/\s+/g, ' ').trim();
+  // Bot-trap fields: humans never see them, so a value there flags the application as spam.
+  const HONEYPOT_LABEL = /(leave (this|it)?\s*(field )?(blank|empty)|do ?n[o']?t (fill|complete|enter)|honey ?pot|bots? only|if you are (a )?human)/i;
+  const honeypot = (el, label) => {
+    if (el.type === 'file' || el.type === 'radio' || el.type === 'checkbox') return false;
+    if (el.closest('[aria-hidden="true"]')) return true;
+    if (HONEYPOT_LABEL.test(label || '')) return true;
+    const r = el.getBoundingClientRect();
+    const w = el.ownerDocument.defaultView || window;
+    if (r.right + w.scrollX <= 0 || r.bottom + w.scrollY <= 0) return true;   // parked off-screen
+    const s = w.getComputedStyle(el);
+    if (parseFloat(s.opacity) === 0 && el.tabIndex < 0) return true;
+    return false;
+  };
   const ownLabel = (el) => {
     if (el.labels && el.labels.length) return clean(Array.from(el.labels).map(l => l.innerText).join(' '));
     const aria = el.getAttribute('aria-label'); if (aria) return clean(aria);
@@ -99,9 +112,10 @@ SCAN_JS = r"""() => {
       groups.get(gname).push(el);
       continue;
     }
+    const label = labelOf(el);
+    if (honeypot(el, label)) continue;
     const key = el.getAttribute('data-aq-key') || nextKey('f');
     el.setAttribute('data-aq-key', key);
-    const label = labelOf(el);
     let kind = el.tagName === 'TEXTAREA' || el.isContentEditable ? 'textarea' : el.tagName === 'SELECT' ? 'select' : type === 'file' ? 'file' : 'text';
     const combo = el.getAttribute('role') === 'combobox' || el.hasAttribute('aria-autocomplete');
     if (combo && kind === 'text') kind = 'combobox';

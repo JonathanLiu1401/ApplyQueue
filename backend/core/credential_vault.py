@@ -73,13 +73,45 @@ class CredentialVault:
 
     # ── storage ──
     def _read(self) -> dict:
+        """A malformed file (truncated write from another tool, hand edit, wrong encoding, wrong
+        shape) is moved aside as ``site_credentials.json.corrupt-<time>`` (never deleted, never
+        overwritten) and an empty vault is used, so applying keeps working; the private sync
+        repo still holds the entries and the next sync restores them."""
         if not self.path.exists():
             return {"version": 1, "sites": {}}
-        data = json.loads(self.path.read_text(encoding="utf-8"))
-        data.setdefault("sites", {})
-        return data
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8-sig"))
+            if not isinstance(data, dict):
+                raise TypeError(f"expected an object, got {type(data).__name__}")
+            data.setdefault("sites", {})
+            if not isinstance(data["sites"], dict):
+                raise TypeError("'sites' is not an object")
+            bad = [h for h, e in data["sites"].items() if not isinstance(e, dict) or not isinstance(e.get("password"), str)]
+            for h in bad:  # one damaged entry must not cost every other site its password
+                data["sites"].pop(h)
+            if not isinstance(data.get(LEGACY_KEY, {}), dict):
+                data.pop(LEGACY_KEY)
+            return data
+        except (ValueError, TypeError, UnicodeDecodeError) as e:
+            self._quarantine(e)
+            return {"version": 1, "sites": {}}
+
+    def _quarantine(self, err: Exception) -> None:
+        import logging
+        import time as _t
+        dest = self.path.with_name(f"{self.path.name}.corrupt-{_t.strftime('%Y%m%d-%H%M%S')}")
+        try:
+            self.path.replace(dest)
+            logging.getLogger("applyqueue.vault").error(
+                "credential vault was unreadable (%s); moved it to %s", type(err).__name__, dest.name)
+        except OSError as move_err:
+            self._stuck_corrupt = True  # never overwrite a file we could not move aside
+            logging.getLogger("applyqueue.vault").error(
+                "credential vault was unreadable (%s) and could not be moved aside: %s", type(err).__name__, move_err)
 
     def _write(self, data: dict) -> None:
+        if getattr(self, "_stuck_corrupt", False):
+            raise OSError(f"{self.path.name} is unreadable and could not be moved aside; not overwriting it")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if sys.platform != "win32":
             os.chmod(self.path.parent, 0o700)

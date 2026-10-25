@@ -1128,3 +1128,91 @@ def test_browser_cleanup_only_kills_this_instances_profile(tmp_path, monkeypatch
         for p in (p_mine, p_other):
             p.kill()
             p.wait()
+
+
+# ── M8 break-it: hostile resume files and a big queue ──────────────────────
+def _image_only_pdf(path):
+    from reportlab.pdfgen import canvas
+    c = canvas.Canvas(str(path))
+    for i in range(30):  # vector "scan": shapes only, no text objects
+        c.rect(40 + i * 15, 300 + (i % 7) * 20, 12, 12, fill=1)
+    c.showPage()
+    c.save()
+    return path
+
+
+def _many_page_pdf(path, pages):
+    from reportlab.pdfgen import canvas
+    c = canvas.Canvas(str(path))
+    for i in range(pages):
+        c.drawString(72, 720, f"Alex Example - page {i + 1} - Platform Engineer at Example Labs")
+        c.showPage()
+    c.save()
+    return path
+
+
+def _parse_with(client, monkeypatch, resume_path):
+    monkeypatch.setattr(main, "load_settings", lambda: {"resume_path": str(resume_path)})
+    monkeypatch.setattr(main, "_resume_location_ok", lambda p: True)
+    monkeypatch.setattr(main, "load_llm_settings", lambda: {})  # stop before any LLM call
+    return client.post("/profile/parse-resume", headers=AUTH).json()
+
+
+def test_parse_resume_image_only_pdf_explains_itself(client, monkeypatch, tmp_path):
+    r = _parse_with(client, monkeypatch, _image_only_pdf(tmp_path / "scan.pdf"))
+    assert r["success"] is False and "image-only" in r["message"]
+
+
+def test_parse_resume_huge_file_refused_fast(client, monkeypatch, tmp_path):
+    import time
+    import core.pdf_io as pdf_io
+    big = tmp_path / "huge.pdf"
+    with open(big, "wb") as f:
+        f.write(b"%PDF-1.4\n")
+        f.truncate(pdf_io.RESUME_MAX_BYTES + 1)   # sparse: no real 50 MB write
+    t0 = time.monotonic()
+    r = _parse_with(client, monkeypatch, big)
+    assert r["success"] is False and "MB" in r["message"]
+    assert time.monotonic() - t0 < 2
+
+
+def test_parse_resume_many_pages_reads_only_the_first(client, monkeypatch, tmp_path):
+    import time
+    pdf = _many_page_pdf(tmp_path / "Alex Example résumé 履歴書 🚀.pdf", 1500)
+    t0 = time.monotonic()
+    r = _parse_with(client, monkeypatch, pdf)
+    took = time.monotonic() - t0
+    assert r["success"] is False and "LLM provider" in r["message"]   # text was read fine
+    assert took < 15, f"{took:.1f}s to read a 1500-page PDF"
+    from core.pdf_io import extract_resume_text
+    assert "page 20 " in extract_resume_text(pdf) and "page 21 " not in extract_resume_text(pdf)
+
+
+def test_unicode_and_nfd_resume_filenames(client, monkeypatch, tmp_path):
+    import unicodedata
+    for name in ("Alex Example – CV (final) ✓.pdf", unicodedata.normalize("NFD", "résumé Zoë.pdf"),
+                 "سيرة ذاتية.pdf", "  spaced  name .pdf"):
+        from tests.fixtures.persona import write_resume_pdf
+        p = write_resume_pdf(tmp_path / name)
+        r = _parse_with(client, monkeypatch, p)
+        assert "LLM provider" in r["message"], (name, r)
+
+
+def test_big_queue_list_and_stats_stay_fast(client, data_dir):
+    import json as _json
+    import time
+    jobs = {f"https://boards.example.com/example-corp/jobs/{i}": {
+        "url": f"https://boards.example.com/example-corp/jobs/{i}", "title": f"Engineer {i} – Ü",
+        "company": f"Example Co {i % 50}", "status": ["pending", "failed", "submitted_unconfirmed",
+                                                      "needs_human"][i % 4], "description": "x" * 400}
+        for i in range(5000)}
+    (data_dir / "jobs.json").write_text(_json.dumps(jobs), "utf-8")
+    t0 = time.monotonic()
+    r = client.get("/jobs", headers=AUTH)
+    t_list = time.monotonic() - t0
+    assert r.status_code == 200
+    t0 = time.monotonic()
+    s = client.get("/jobs/stats", headers=AUTH)
+    t_stats = time.monotonic() - t0
+    assert s.status_code == 200
+    assert t_list < 3 and t_stats < 3, (t_list, t_stats)

@@ -145,6 +145,10 @@ try:
     from core.config import get_data_dir
 except ImportError:
     from backend.core.config import get_data_dir
+try:
+    from memory import sqlite_util as _sq
+except ImportError:
+    from backend.memory import sqlite_util as _sq
 
 
 def _get_db_path() -> Path:
@@ -161,16 +165,14 @@ class MemoryStore:
     def __init__(self, db_path: Path = DB_PATH):
         self.db_path = db_path
         self._local = threading.local()
-        self._init_db()
+        _sq.init_or_recover(self, self._init_db)
 
     # ── Connection management ─────────────────────────────────────────────
 
     def _get_conn(self) -> sqlite3.Connection:
         """Get a thread-local connection."""
         if not hasattr(self._local, "conn") or self._local.conn is None:
-            self._local.conn = sqlite3.connect(str(self.db_path))
-            self._local.conn.row_factory = sqlite3.Row
-            self._local.conn.execute("PRAGMA journal_mode=WAL")
+            self._local.conn = _sq.connect(self.db_path)
         return self._local.conn
 
     def close(self):

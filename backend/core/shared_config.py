@@ -307,13 +307,16 @@ def build_memory_context(
 
     # ── Per-website memory injection ──────────────────────────────────────
     if job_url:
-        store = get_memory_store()
-        memories = store.get_domain_memories(job_url, limit=20)
-        if memories:
-            domain = store.extract_domain(job_url)
-            mem_count = len(memories)
-            print(f"    🧠 Injecting {mem_count} memories for {domain}")
-            parts.append(store.format_for_prompt(memories))
+        try:
+            store = get_memory_store()
+            memories = store.get_domain_memories(job_url, limit=20)
+            if memories:
+                domain = store.extract_domain(job_url)
+                mem_count = len(memories)
+                print(f"    🧠 Injecting {mem_count} memories for {domain}")
+                parts.append(store.format_for_prompt(memories))
+        except Exception as e:  # locked/unreadable memory db: apply without site memories
+            print(f"    ⚠️  Site memories unavailable: {e}")
 
     parts.append(
         "TRACKING INSTRUCTIONS:\n"

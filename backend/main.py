@@ -245,17 +245,19 @@ def _recover_stale_jobs():
             _log.info("Moved the legacy shared ATS password from settings.json into the local vault")
     except Exception as e:
         _log.warning(f"Settings secret migration failed: {e}")
+    try:
+        from core.jobs_store import recover_stale_claims
+    except ImportError:
+        from backend.core.jobs_store import recover_stale_claims
     jobs = read_jobs()
-    recovered = 0
-    for url, job in jobs.items():
-        if job.get("status") == "in_progress":
-            job["status"] = "pending"
-            recovered += 1
+    recovered, flagged = recover_stale_claims(jobs)
     migrated = js.migrate_jobs(jobs)
-    if recovered or migrated:
+    if recovered or flagged or migrated:
         write_jobs(jobs)
     if recovered:
         _log.info(f"Recovered {recovered} stale in_progress jobs back to pending")
+    if flagged:
+        _log.warning(f"{flagged} interrupted jobs had already pressed Submit; flagged for a person, not re-applied")
     if migrated:
         _log.info(f"Migrated {migrated} legacy 'applied' jobs to 'submitted_unconfirmed'")
 

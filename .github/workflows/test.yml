@@ -201,6 +201,8 @@ jobs:
           echo "Python arch: $ARCH"
           test "$ARCH" = "x86_64"
       - run: npm ci
+      - name: Install Playwright Chromium (mock ATS + agent e2e)
+        run: uv run python -m playwright install chromium
       - name: Backend unit tests (pytest, x86_64)
         run: uv run pytest tests/ -q
       - name: Build backend sidecar (x86_64)

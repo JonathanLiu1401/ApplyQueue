@@ -448,17 +448,21 @@ def test_schedules_exported_and_remote_runs_and_agent_postings(world):
     assert "token" not in world.remote_file("schedules/searches.json").lower()
 
 
-def test_named_lock_heartbeat_and_takeover(world):
-    import time as _t
+def test_named_lock_heartbeat_and_takeover(world, monkeypatch):
+    # A fake lock clock: slow CI runners (git push/pull can take seconds) made a sleep-based
+    # version of this test flaky on Windows and the Intel Mac.
+    from core.sync import engine as eng
+    now = [1_800_000_000.0]
+    monkeypatch.setattr(eng, "_clock", lambda: now[0])
     a = world.use("laptop")
     a.sync_now()
     assert a.try_named_lock("search-s_1", 2)["ok"]
-    _t.sleep(1.2)
+    now[0] += 1.5
     assert world.use("laptop").renew_named("search-s_1", 2)["ok"]      # heartbeat pushes a fresh claim
-    _t.sleep(1.2)
+    now[0] += 1.5                                                    # 3 s after the claim, 1.5 s after the beat
     assert world.use("desktop").try_named_lock("search-s_1", 600)["ok"] is False   # still alive
     assert json.loads(world.remote_file("locks/search-s_1.json"))["renewed"] == 1
-    _t.sleep(2.2)                                                    # beats stopped (laptop asleep)
+    now[0] += 2.5                                                    # beats stopped (laptop asleep)
     assert world.use("desktop").try_named_lock("search-s_1", 600)["stale_recovered"]
     res = world.use("laptop").renew_named("search-s_1", 2)           # laptop wakes up
     assert res == {"ok": False, "reason": "taken_over", "holder": "desktop"}

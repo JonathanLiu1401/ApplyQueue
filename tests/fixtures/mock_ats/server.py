@@ -106,7 +106,7 @@ SITES: dict[str, dict] = {
             F("email", "Email *", "email", required=True),
             F("resume", "Resume *", "file", required=True),
             F("location", "Location", "combobox",
-              options=["Springfield, IL", "Portland, OR", "Austin, TX", "Remote - US"]),
+              options=["Springfield, IL", "Portland, OR", "Denver, CO", "Remote - US"]),
             F("relocate", "Are you open to relocation? *", "radio", required=True, options=YN),
             F("relocate_notes", "Tell us about your relocation timeline", "textarea",
               show_if=("relocate", "Yes")),

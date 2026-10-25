@@ -10,6 +10,7 @@
 
 import asyncio
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -42,6 +43,7 @@ class RunLedger:
     """Everything our own code observed during one application run."""
     needs_human: list[dict] = field(default_factory=list)
     confirmations: list[dict] = field(default_factory=list)
+    submit_attempts: dict = field(default_factory=dict)   # url+form signature -> guarded submit clicks
     unanswered_last: list[dict] = field(default_factory=list)
     blocked_submits: int = 0
     passwords: list[dict] = field(default_factory=list)  # {host, mode, created} - never the password
@@ -100,11 +102,78 @@ class PasswordParams(BaseModel):
     mode: Literal["new_account", "sign_in"] = "sign_in"
 
 
+# Not "apply": that opens a form on job pages, where an unrelated search box must not block it.
+MAX_SAME_FORM_SUBMITS = 3
+SUBMIT_WORDS = re.compile(r"\b(submit|send application|next|continue|review|finish|save and continue|"
+                          r"save & continue)\b", re.I)
+
+
+def _note_submit_click(url: str) -> None:
+    """Persist the submit marker before clicking (crash recovery never re-applies after it)."""
+    if not url:
+        return
+    try:
+        try:
+            from core import jobs_store
+        except ImportError:  # pragma: no cover
+            from backend.core import jobs_store
+        jobs_store.mark_submit_click(url)
+    except Exception:  # never block a click on bookkeeping
+        pass
+
+
+def looks_like_submit(node) -> bool:
+    """A button/link/input whose type or text reads as moving the application forward."""
+    try:
+        tag = (node.tag_name or "").lower()
+        attrs = {k.lower(): str(v) for k, v in (node.attributes or {}).items()}
+        text = " ".join(x for x in (node.get_all_children_text() or "", attrs.get("value", ""),
+                                     attrs.get("aria-label", ""), attrs.get("title", "")) if x)
+    except Exception:
+        return False
+    if tag == "input" and attrs.get("type", "").lower() in ("submit", "image"):
+        return True
+    if tag in ("button", "a", "input") or attrs.get("role", "").lower() == "button":
+        return bool(SUBMIT_WORDS.search(text))
+    return False
+
+
+def _guard_builtin_click(tools: Tools, ledger: RunLedger, context: dict) -> None:
+    """The built-in ``click`` must not become a way around submit_form_guarded: a click on a
+    Next/Submit-looking control is refused while the form has unanswered questions, and every
+    allowed one records the crash-recovery submit marker first."""
+    actions = getattr(getattr(tools, "registry", None), "registry", None)
+    reg = getattr(actions, "actions", {}).get("click") if actions else None
+    if reg is None:
+        return
+    original = reg.function
+
+    async def click(params=None, browser_session: BrowserSession = None, **kwargs):
+        idx = getattr(params, "index", None)
+        if browser_session is not None and idx is not None:
+            try:
+                node = await browser_session.get_element_by_index(idx)
+            except Exception:
+                node = None
+            if node is not None and looks_like_submit(node):
+                remaining = _remaining_after_ledger(await fg.scan(session_evaluator(browser_session)), ledger)
+                ledger.unanswered_last = [f.brief() for f in remaining]
+                if remaining:
+                    ledger.blocked_submits += 1
+                    return ActionResult(error="Refused to click a Next/Submit button: unanswered questions "
+                                              f"{_fmt(remaining)}")
+                _note_submit_click(context.get("url", ""))
+        return await original(params=params, browser_session=browser_session, **kwargs)
+
+    reg.function = click
+
+
 def build_apply_tools(*, ledger: RunLedger, profile: dict, qa: dict, context: dict | None = None,
                       vault: CredentialVault | None = None, account_email: str = "",
                       sensitive_data: dict | None = None) -> Tools:
     tools = Tools()
     context = context or {}
+    _guard_builtin_click(tools, ledger, context)
 
     @tools.action("Scan the current page's application form and list every question that is still unanswered, "
                   "INCLUDING optional ones, with its category (eeo/essay/cover_letter/resume/generic).")
@@ -113,7 +182,8 @@ def build_apply_tools(*, ledger: RunLedger, profile: dict, qa: dict, context: di
         remaining = fg.unanswered(fields)
         msg = (f"{len(fields)} fields, {len(remaining)} unanswered: {_fmt(remaining)}" if fields
                else "No form fields found in the main page (if a form is visible it may be in an iframe).")
-        return ActionResult(extracted_content=msg, long_term_memory=f"scan_form: {len(remaining)} unanswered")
+        # long_term_memory is what the model sees in later steps: it must carry the list itself.
+        return ActionResult(extracted_content=msg, long_term_memory=("scan_form: " + msg)[:2500])
 
     @tools.action("Fill every unanswered field that the candidate profile or saved answers cover (EEO gets the "
                   "decline option when the profile has no answer). Retries direct-set, dropdown search and typing. "
@@ -123,9 +193,13 @@ def build_apply_tools(*, ledger: RunLedger, profile: dict, qa: dict, context: di
         summary = {"filled": [f["label"] for f in res["filled"]],
                    "failed_all_strategies": [f["label"] for f in res["failed"]],
                    "answer_yourself": res["remaining"]}
+        brief = {"filled_count": len(summary["filled"]), "failed_all_strategies": summary["failed_all_strategies"],
+                 "answer_yourself": [{k: f.get(k) for k in ("key", "label", "kind", "category", "options") if f.get(k)}
+                                     for f in res["remaining"]]}
+        # browser_use shows only long_term_memory in the history, so the questions the model must
+        # still answer have to be in it (before M8 the model never saw this list).
         return ActionResult(extracted_content=json.dumps(summary, ensure_ascii=False)[:6000],
-                            long_term_memory=f"autofill: {len(res['filled'])} filled, "
-                                             f"{len(res['failed']) + len(res['remaining'])} left")
+                            long_term_memory=("autofill: " + json.dumps(brief, ensure_ascii=False))[:3000])
 
     @tools.action("Verify that every question on the current form page is answered (including optional ones) "
                   "before clicking Next/Continue/Submit.")
@@ -140,15 +214,31 @@ def build_apply_tools(*, ledger: RunLedger, profile: dict, qa: dict, context: di
     @tools.action("Click a Next/Continue/Review/Submit button by index, but ONLY if every question on the page is "
                   "answered; otherwise returns the unanswered questions.", param_model=IndexParams)
     async def submit_form_guarded(params: IndexParams, browser_session: BrowserSession) -> ActionResult:
-        remaining = _remaining_after_ledger(await fg.scan(session_evaluator(browser_session)), ledger)
+        scanned = await fg.scan(session_evaluator(browser_session))
+        remaining = _remaining_after_ledger(scanned, ledger)
         ledger.unanswered_last = [f.brief() for f in remaining]
         if remaining:
             ledger.blocked_submits += 1
             return ActionResult(error=f"Refused to click: unanswered questions {_fmt(remaining)}")
+        # The same form submitted again and again means the site rejects it (a validation message the
+        # agent cannot fix). Cap it so a run cannot hammer a site with dozens of submits.
+        try:
+            url = await browser_session.get_current_page_url()
+        except Exception:
+            url = ""
+        sig = url + "|" + "|".join(sorted(str(f.brief().get("label", "")) for f in scanned))
+        counts = ledger.submit_attempts
+        counts[sig] = counts.get(sig, 0) + 1
+        if counts[sig] > MAX_SAME_FORM_SUBMITS:
+            ledger.blocked_submits += 1
+            return ActionResult(error=f"Refused to click: this form was already submitted {MAX_SAME_FORM_SUBMITS} times "
+                                      "without the page moving on. Read the error message on the page and fix the "
+                                      "field, or call report_needs_human with that message.")
         from browser_use.browser.events import ClickElementEvent
         node = await browser_session.get_element_by_index(params.index)
         if node is None:
             return ActionResult(error=f"Element {params.index} not found - refresh the page state and retry")
+        _note_submit_click(context.get("url", ""))
         event = browser_session.event_bus.dispatch(ClickElementEvent(node=node))
         await event
         await event.event_result(raise_if_any=True, raise_if_none=False)

@@ -124,6 +124,14 @@ async def save_new_qa(new_questions: dict, source_domain: str = ""):
             save_json(QA_FILE, qa)
 
 
+def _safe_log_name(company: str, title: str) -> str:
+    """One path segment on every OS: no separators, no Windows-reserved characters, bounded length."""
+    import re as _re
+    raw = f"apply_{company}_{title}"
+    name = _re.sub(r"[^\w.-]+", "_", raw, flags=_re.UNICODE).strip("._") or "apply"
+    return name[:80]
+
+
 def _is_linkedin(url: str) -> bool:
     from urllib.parse import urlparse
     host = (urlparse(url).hostname or "").lower()
@@ -151,6 +159,28 @@ async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[
         print(f"  ⏭️  [W{worker_id}] Skipped (already claimed): {title} at {company}")
         return "skipped"
 
+    try:
+        return await _apply_claimed(job, profile, qa, applied_labels, easy_apply, worker_id,
+                                    resume_path_override, url, title, company)
+    except Exception as e:  # anything before the agent's own error handling: never leave it in_progress
+        await save_job_status(url, js.FAILED, f"Could not start the application: {e}"[:2000])
+        print(f"  ❌ [W{worker_id}] Error before start: {title} at {company} — {str(e)[:100]}")
+        return "failed"
+
+
+def _submit_was_clicked(url: str) -> bool:
+    try:
+        try:
+            from core import jobs_store
+        except ImportError:  # pragma: no cover
+            from backend.core import jobs_store
+        return int((jobs_store.get_job(url) or {}).get("submit_clicks") or 0) > 0
+    except Exception:
+        return True  # unknown: be safe, do not auto-retry
+
+
+async def _apply_claimed(job, profile, qa, applied_labels, easy_apply, worker_id, resume_path_override,
+                         url, title, company) -> str:
     # Always refresh credentials before each job to avoid mid-run expiry
     refresh_credentials()
 
@@ -186,6 +216,9 @@ async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[
     }
     if not agent_sensitive_data["email"]:
         agent_sensitive_data["email"] = agent_sensitive_data["account_email"]
+    if not agent_sensitive_data["account_email"]:
+        # No separate login email configured: sign up with the profile email rather than an empty one.
+        agent_sensitive_data["account_email"] = agent_sensitive_data["email"]
     vault = CredentialVault.default()
     legacy_pw = (SENSITIVE_DATA.get("password") or "").strip()
     if legacy_pw:  # LangHire's shared password: kept for signing in to existing accounts only
@@ -221,19 +254,16 @@ async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[
             "4. NEVER open webmail (mail.google.com, outlook.com) in the browser"
         )
     else:
-        checks.append(
-            "Open a new tab and go to https://mail.google.com/mail/u/0/#inbox to check Gmail.\n"
-            "   - If you see the Gmail inbox (list of emails) → logged in ✓\n"
-            "   - If you see a Google sign-in page or redirect → WAIT for user to log in manually. Check every 15 seconds. Wait up to 5 minutes.\n"
-            "   Then close the Gmail tab."
-        )
+        # No mailbox linked: no up-front Gmail wait (it stalled every unattended run for 5 minutes);
+        # Gmail is only opened if a site actually asks for a code.
         otp_instructions = (
             "\n\nOTP/VERIFICATION CODES: If ANY site asks for a verification code, OTP, or 2FA token:\n"
             "1. Choose the EMAIL option if given a choice\n"
             "2. Open a new tab and go to https://mail.google.com\n"
             "3. Find the most recent email with the verification/OTP code\n"
             "4. Copy the code, switch back to the application tab, and enter it\n"
-            "5. This is NOT a blocker — always attempt to retrieve the code from Gmail before giving up"
+            "5. This is NOT a blocker — always attempt to retrieve the code from Gmail before giving up.\n"
+            "6. If Gmail shows a sign-in page, do not wait: call report_needs_human for the verification code"
         )
     login_preamble = ""
     if checks:
@@ -284,11 +314,13 @@ async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[
 
     def _on_step_with_limit(browser_state, agent_output, step_num):
         _agent_on_step(browser_state, agent_output, step_num)
-        _step_count["n"] += 1
-        if _step_count["n"] >= MAX_STEPS:
-            raise Exception(f"Reached maximum of {MAX_STEPS} steps — stopping to avoid wasting tokens")
+        _step_count["n"] += 1  # the hard stop is agent.run(max_steps=MAX_STEPS); raising here only
+        # produced repeated "failures" and up to 10 extra paid LLM calls
 
     agent = Agent(
+        # browser_use's built-in judge is one more paid LLM call per run (with the whole trace);
+        # ApplyQueue decides the outcome from page evidence instead.
+        use_judge=False,
         task=(
             f"{apply_instructions}\n\n"
             f"{apply_policy_text()}\n"
@@ -310,14 +342,14 @@ async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[
         tools=apply_tools,
         extend_system_message=memory,
         available_file_paths=[resume_path],
-        save_conversation_path=str(LOGS_DIR / f"apply_{company.replace(' ', '_')}_{title.replace(' ', '_')[:30]}"),
+        save_conversation_path=str(LOGS_DIR / _safe_log_name(company, title)),
         calculate_cost=True,
         register_new_step_callback=_on_step_with_limit,
         register_done_callback=_agent_on_done,
     )
 
     try:
-        result = await agent.run()
+        result = await agent.run(max_steps=MAX_STEPS)
 
         # Extract Q&A from history
         _, new_questions = extract_from_history(result)
@@ -361,20 +393,14 @@ async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[
                 import asyncio
                 from browser_use.llm.messages import UserMessage
                 extraction_llm = config.get_llm()
-                loop = asyncio.new_event_loop()
-                try:
-                    resp = loop.run_until_complete(
-                        asyncio.wait_for(
-                            extraction_llm.ainvoke([UserMessage(content=prompt)]),
-                            timeout=30,
-                        )
-                    )
-                    return resp.completion if hasattr(resp, 'completion') else (resp.content if hasattr(resp, 'content') else str(resp))
-                finally:
-                    loop.close()
+                # Runs in a worker thread (asyncio.to_thread below), so it gets its own loop; calling
+                # run_until_complete on the agent's thread failed every time ("another loop is running").
+                resp = asyncio.run(asyncio.wait_for(
+                    extraction_llm.ainvoke([UserMessage(content=prompt)]), timeout=30))
+                return resp.completion if hasattr(resp, 'completion') else (resp.content if hasattr(resp, 'content') else str(resp))
 
-            llm_learnings = extract_learnings_via_llm(
-                result, job_url=url, job_title=title, success=success,
+            llm_learnings = await asyncio.to_thread(
+                extract_learnings_via_llm, result, job_url=url, job_title=title, success=success,
                 llm_call=_llm_call,
             )
             if llm_learnings:
@@ -393,7 +419,8 @@ async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[
                 step_count=len(result.history),
                 memories_injected=memories_injected_count,
                 memories_extracted=memories_extracted_count,
-                error_message=(result.errors()[-1][:2000] if result.errors() else None) if not success else None,
+                error_message=(next((e for e in reversed(result.errors()) if e), "")[:2000] or None)
+                if not success else None,
             )
         except Exception as metrics_err:
             print(f"    ⚠️  [W{worker_id}] Metrics recording failed (non-fatal): {metrics_err}")
@@ -411,7 +438,7 @@ async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[
             await save_job_status(url, js.NEEDS_HUMAN, outcome.reason, **evidence_fields)
             print(f"  🙋 [W{worker_id}] Needs a person: {title} at {company} — {outcome.reason[:100]}")
         else:
-            error_msg = result.errors()[-1] if result.errors() else None
+            error_msg = next((e for e in reversed(result.errors()) if e), None)
             error_msg = error_msg or ("Agent reported failure" if not agent_claimed else outcome.reason)
             await save_job_status(url, js.FAILED, error_msg[:2000], **evidence_fields)
             print(f"  ❌ [W{worker_id}] Failed: {title} at {company} — {error_msg[:100]}")
@@ -419,7 +446,9 @@ async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[
 
     except Exception as e:
         error_str = str(e)
-        if "security token" in error_str.lower() or "expired" in error_str.lower():
+        retriable = "security token" in error_str.lower() or "expired" in error_str.lower()
+        if retriable and job.get("_retries", 0) < 1 and not _submit_was_clicked(url):
+            job["_retries"] = job.get("_retries", 0) + 1
             refresh_credentials()
             await save_job_status(url, "pending", "credentials_expired_retry")
             print(f"  🔑 [W{worker_id}] Credentials expired on: {title} at {company} — refreshed, will retry")

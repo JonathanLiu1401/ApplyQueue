@@ -97,16 +97,47 @@ def get_data_dir() -> Path:
     return base
 
 
+def quarantine_corrupt(path: Path, err: Exception) -> None:
+    """Move an unreadable JSON file aside (never delete it) so the app can start with defaults."""
+    import time as _t
+    dest = path.with_name(f"{path.name}.corrupt-{_t.strftime('%Y%m%d-%H%M%S')}")
+    try:
+        path.replace(dest)
+        _log.error("%s was unreadable (%s); moved it to %s and continued with defaults", path.name, err, dest.name)
+    except OSError as move_err:  # read-only dir etc.: leave it, still use defaults
+        _log.error("%s was unreadable (%s) and could not be moved aside: %s", path.name, err, move_err)
+
+
+def read_json_file(path: Path, default):
+    """Read JSON as UTF-8 (BOM tolerated). A corrupt or truncated file is quarantined and
+    ``default`` returned, instead of crashing startup or being silently overwritten."""
+    try:
+        raw = path.read_text(encoding="utf-8-sig")
+    except FileNotFoundError:
+        return default
+    except UnicodeDecodeError as e:
+        quarantine_corrupt(path, e)
+        return default
+    try:
+        data = json.loads(raw)
+    except ValueError as e:
+        quarantine_corrupt(path, e)
+        return default
+    if default is not None and not isinstance(data, type(default)):
+        quarantine_corrupt(path, TypeError(f"expected {type(default).__name__}, got {type(data).__name__}"))
+        return default
+    return data
+
+
 def _load_json(path: Path, default=None):
-    if path.exists():
-        return json.loads(path.read_text())
-    return default if default is not None else {}
+    data = read_json_file(path, default)
+    return {} if data is None else data
 
 
 def _save_json(path: Path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2))
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
     tmp.replace(path)
     if any(s in path.name for s in ("llm_settings", "settings")):
         try:

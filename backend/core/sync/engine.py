@@ -90,8 +90,13 @@ def _auto_search_ids() -> set[str]:
         return set()
 
 
+def _clock() -> float:
+    """The lock clock (a seam so tests can move time without sleeping)."""
+    return time.time()
+
+
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.fromtimestamp(_clock(), timezone.utc).isoformat()
 
 
 def _parse(ts: str) -> float:
@@ -337,7 +342,7 @@ class SyncEngine:
     def _lock_expired(self, blob: str) -> bool:
         try:
             d = json.loads(blob)
-            return _parse(d["claimed_at"]) + int(d.get("ttl_sec", 0)) < time.time()
+            return _parse(d["claimed_at"]) + int(d.get("ttl_sec", 0)) < _clock()
         except (ValueError, KeyError, TypeError):
             return True
 

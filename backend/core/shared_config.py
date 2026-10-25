@@ -107,15 +107,18 @@ def get_memory_store() -> MemoryStore:
 
 
 def load_json(path: Path, default=None):
-    if path.exists():
-        return json.loads(path.read_text())
-    return default if default is not None else []
+    try:
+        from core.config import read_json_file
+    except ImportError:  # pragma: no cover
+        from backend.core.config import read_json_file
+    data = read_json_file(Path(path), default)
+    return [] if data is None else data
 
 
 def save_json(path: Path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2))
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
     tmp.replace(path)
 
 
@@ -197,32 +200,64 @@ def build_memory_context(
     """Build the system message context with candidate profile, Q&A bank, and per-website learnings."""
     parts = []
 
+    profile = profile if isinstance(profile, dict) else {}
+    # A quick-start profile has only a few fields; nothing below may assume a key exists.
+    def _d(v) -> dict:
+        return v if isinstance(v, dict) else {}
+
+    def _l(v) -> list:
+        return [str(x) for x in v if x not in (None, "")] if isinstance(v, (list, tuple)) else ([str(v)] if v else [])
+
+    def _num(v):
+        try:
+            return f"{int(float(str(v).replace(',', ''))):,}"
+        except (TypeError, ValueError):
+            return str(v)
+
     # Salary formatting (country-aware)
-    sal = profile.get('salary_expectation', {})
+    sal = _d(profile.get('salary_expectation'))
     sal_currency = sal.get('currency', 'USD') or 'USD'
     sal_min = sal.get('min', 0) or 0
     sal_max = sal.get('max', 0) or 0
-    sal_period = sal.get('period', 'annual')
-    salary_str = f"{sal_currency} {sal_min:,}-{sal_max:,} ({sal_period})" if sal_min else "Not specified"
+    sal_period = sal.get('period', 'annual') or 'annual'
+    if sal_min:
+        salary_str = f"{sal_currency} {_num(sal_min)}" + (f"-{_num(sal_max)}" if sal_max else "") + f" ({sal_period})"
+    else:
+        salary_str = "Not specified"
 
     # Country-aware date format
     date_format = profile.get('date_format', '') or 'MM/DD/YYYY'
 
-    profile_lines = [
-        "CANDIDATE PROFILE:",
-        f"Name: {profile['name']}",
-        f"Email: {profile['email']}, Phone: {profile.get('phone_country_code', '')}{profile['phone']}",
-        f"Location: {profile['address']['city']}, {profile['address']['state']} {profile['address']['zip']} {profile['address'].get('country', '')}".strip(),
-        f"Work Authorization: {profile['work_authorization']}, Visa Sponsorship Needed: {profile['visa_sponsorship_needed']}",
-        f"Willing to Relocate: {profile['willing_to_relocate']}, Preferred Work Mode: {profile['preferred_work_mode']}",
-        f"Years of Experience: {profile['years_of_experience']}",
-        f"Education: {profile['education']['degree']} from {profile['education']['school']} ({profile['education']['graduation']})",
-        f"Current Role: {profile['current_role']}",
-        f"Target Locations: {', '.join(profile['target_locations'])}",
-        f"Languages: {', '.join(profile['languages'])}",
-        f"Skills: {', '.join(profile['skills'])}",
-        f"Salary: {salary_str}",
+    addr = _d(profile.get('address'))
+    edu = _d(profile.get('education'))
+    phone = f"{profile.get('phone_country_code', '') or ''}{profile.get('phone', '') or ''}"
+    location = " ".join(x for x in (", ".join(x for x in (addr.get('city'), addr.get('state')) if x),
+                                    addr.get('zip') or "", addr.get('country') or "") if x).strip()
+    edu_text = " from ".join(x for x in (edu.get('degree'), edu.get('school')) if x)
+    if edu_text and edu.get('graduation'):
+        edu_text += f" ({edu['graduation']})"
+    candidates = [
+        ("Name", profile.get('name')),
+        ("Email", profile.get('email')),
+        ("Phone", phone),
+        ("Location", location),
+        ("Work Authorization", profile.get('work_authorization')),
+        ("Visa Sponsorship Needed", profile.get('visa_sponsorship_needed')),
+        ("Willing to Relocate", profile.get('willing_to_relocate')),
+        ("Preferred Work Mode", profile.get('preferred_work_mode')),
+        ("Years of Experience", profile.get('years_of_experience')),
+        ("Education", edu_text),
+        ("Current Role", profile.get('current_role')),
+        ("Current Company", profile.get('current_company')),
+        ("Target Locations", ", ".join(_l(profile.get('target_locations')))),
+        ("Languages", ", ".join(_l(profile.get('languages')))),
+        ("Skills", ", ".join(_l(profile.get('skills')))),
     ]
+    profile_lines = ["CANDIDATE PROFILE:"] + [f"{k}: {v}" for k, v in candidates if v not in (None, "")]
+    profile_lines.append(f"Salary: {salary_str}")
+    missing = [k for k, v in candidates if v in (None, "")]
+    if missing:
+        profile_lines.append("Not in the profile (answer only from the resume, never invent): " + ", ".join(missing))
     if profile.get('notice_period'):
         profile_lines.append(f"Notice Period: {profile['notice_period']}")
     if profile.get('nationality'):

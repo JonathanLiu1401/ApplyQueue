@@ -161,6 +161,9 @@ async def collect_for_title(title: str, existing_jobs: dict, profile: dict, max_
         search_url += "&f_TPR=r604800"
 
     agent = Agent(
+        # browser_use's built-in judge is one more paid LLM call per run (with the whole trace);
+        # ApplyQueue decides the outcome from page evidence instead.
+        use_judge=False,
         task=(
             f"FIRST — LOGIN CHECK:\n"
             f"1. Go to https://www.linkedin.com/feed/ to check if you're logged into LinkedIn.\n"
@@ -251,6 +254,9 @@ async def fetch_description_for_job(url: str, job: dict) -> str:
     company = job.get("company", "unknown")
 
     agent = Agent(
+        # browser_use's built-in judge is one more paid LLM call per run (with the whole trace);
+        # ApplyQueue decides the outcome from page evidence instead.
+        use_judge=False,
         task=(
             f"Go to {url} on LinkedIn. Extract the FULL job description text including:\n"
             f"- Job title\n- Company name\n- Location\n- About the job / description\n"

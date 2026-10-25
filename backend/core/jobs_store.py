@@ -9,6 +9,8 @@ paths are used so both always point at the same file.
 from __future__ import annotations
 
 import json
+import os
+import socket
 import sys
 import threading
 from datetime import datetime, timezone
@@ -18,10 +20,10 @@ from filelock import FileLock
 
 try:
     from core import job_status as js
-    from core.config import get_data_dir
+    from core.config import get_data_dir, read_json_file
 except ImportError:  # pragma: no cover
     from backend.core import job_status as js
-    from backend.core.config import get_data_dir
+    from backend.core.config import get_data_dir, read_json_file
 
 _claim_lock = threading.Lock()
 
@@ -38,13 +40,7 @@ def _paths() -> tuple[Path, Path]:
 
 
 def _load(path: Path) -> dict:
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
+    return read_json_file(path, {})
 
 
 def _save(path: Path, data: dict) -> None:
@@ -76,6 +72,79 @@ def update_job(url: str, **fields) -> bool:
 
 
 REMOTE_BACKOFF_S = 15 * 60
+# An in_progress claim older than this is stale even when its pid looks alive (pid reuse).
+STALE_CLAIM_S = 6 * 3600
+
+
+def _stamp_claim(job: dict) -> None:
+    job["claimed_at"] = datetime.now(timezone.utc).isoformat()
+    job["claimed_pid"] = os.getpid()
+    job["claimed_host"] = socket.gethostname()
+    job.pop("submit_clicks", None)
+    job.pop("last_submit_click_at", None)
+
+
+def mark_submit_click(url: str) -> bool:
+    """Record, BEFORE the click, that a Next/Submit button is about to be pressed for this job.
+    If the process dies right after, crash recovery knows the application may already be in
+    and flags it for a person instead of re-applying (no duplicate submissions)."""
+    if not url:
+        return False
+    jobs_file, lock = _paths()
+    with FileLock(str(lock)):
+        jobs = _load(jobs_file)
+        job = jobs.get(url)
+        if not isinstance(job, dict):
+            return False
+        job["submit_clicks"] = int(job.get("submit_clicks") or 0) + 1
+        job["last_submit_click_at"] = datetime.now(timezone.utc).isoformat()
+        _save(jobs_file, jobs)
+        return True
+
+
+def _pid_alive(pid) -> bool:
+    try:
+        import psutil
+        return bool(pid) and psutil.pid_exists(int(pid))
+    except Exception:
+        return False
+
+
+def claim_is_live(job: dict, now: datetime | None = None) -> bool:
+    """True while the process that claimed this job (on this machine) is still running."""
+    if job.get("claimed_host") != socket.gethostname() or not _pid_alive(job.get("claimed_pid")):
+        return False
+    if job.get("claimed_pid") == os.getpid():
+        return False  # our own pid after a restart is a coincidence, never a live worker
+    try:
+        at = datetime.fromisoformat(str(job.get("claimed_at")))
+    except ValueError:
+        return False
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    return ((now or datetime.now(timezone.utc)) - at).total_seconds() < STALE_CLAIM_S
+
+
+INTERRUPTED_AFTER_SUBMIT = ("The app stopped right after pressing Next/Submit on this application, so it may "
+                            "already have gone in. Check the employer's site or your email before retrying.")
+
+
+def recover_stale_claims(jobs: dict) -> tuple[int, int]:
+    """Crash recovery for in-memory ``jobs``: dead claims go back to pending, unless a submit click
+    was recorded (then needs_human, never a silent re-apply). Live claims of another running
+    instance are left alone. Returns (requeued, flagged)."""
+    requeued = flagged = 0
+    for job in jobs.values():
+        if not isinstance(job, dict) or job.get("status") != js.IN_PROGRESS or claim_is_live(job):
+            continue
+        if int(job.get("submit_clicks") or 0) > 0:
+            job["status"] = js.NEEDS_HUMAN
+            job["error"] = INTERRUPTED_AFTER_SUBMIT
+            flagged += 1
+        else:
+            job["status"] = js.PENDING
+            requeued += 1
+    return requeued, flagged
 
 
 def remote_claim(url: str, job: dict | None) -> bool:
@@ -113,7 +182,7 @@ def claim_job(url: str) -> bool:
         if not (url in jobs and jobs[url].get("status") == js.PENDING):
             return False
         jobs[url]["status"] = js.IN_PROGRESS
-        jobs[url]["claimed_at"] = datetime.now(timezone.utc).isoformat()
+        _stamp_claim(jobs[url])
         _save(jobs_file, jobs)
         job = dict(jobs[url])
     if not remote_claim(url, job):
@@ -133,7 +202,7 @@ def claim_next_pending() -> dict | None:
                 if (isinstance(job, dict) and job.get("status") == js.PENDING and job.get("review") != "pending"
                         and not _remote_backoff(job)):
                     job["status"] = js.IN_PROGRESS
-                    job["claimed_at"] = datetime.now(timezone.utc).isoformat()
+                    _stamp_claim(job)
                     _save(jobs_file, jobs)
                     picked = (url, {**job, "url": job.get("url") or url})
                     break

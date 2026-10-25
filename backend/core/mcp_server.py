@@ -581,6 +581,14 @@ class ApplyQueueTools:
             stamp = _now()
             self.state.update_ledger(lambda led: (led.__setitem__("last_submit_at", stamp),
                                                    led.__setitem__("submit_clicks", led["submit_clicks"] + 1)))
+            try:  # crash recovery must never re-apply after this click
+                try:
+                    from core import jobs_store
+                except ImportError:  # pragma: no cover
+                    from backend.core import jobs_store
+                jobs_store.mark_submit_click(self.state.current() or "")
+            except Exception:
+                pass
             loc = self.browser.locator(ref)
             try:
                 await loc.click(timeout=10000)

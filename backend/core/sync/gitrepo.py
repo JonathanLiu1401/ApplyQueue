@@ -34,6 +34,13 @@ _NET_HINTS = ("could not resolve host", "unable to access", "connection refused"
               "operation timed out", "temporary failure in name resolution", "ssl")
 
 
+# A concurrent push from another device won the ref update between our fetch and our push.
+# git reports that as a remote-side ref lock failure, not "[rejected]" (local bare remotes and
+# github.com both do this): it is a normal lost race, so fetch/merge/retry like non-fast-forward.
+_RACE_HINTS = ("cannot lock ref", "failed to update ref", "incorrect old value provided",
+               "failed to lock", "reference already exists")
+
+
 def git_available() -> str | None:
     return shutil.which("git")
 
@@ -64,7 +71,8 @@ class GitRepo:
         if check and p.returncode != 0:
             err = (p.stderr or p.stdout or "").strip()
             low = err.lower()
-            if "[rejected]" in low or "non-fast-forward" in low or "fetch first" in low:
+            if "[rejected]" in low or "non-fast-forward" in low or "fetch first" in low \
+                    or any(h in low for h in _RACE_HINTS):
                 raise PushRejected("push rejected", err)
             if any(h in low for h in _NET_HINTS):
                 raise NetworkError("remote unreachable", err)

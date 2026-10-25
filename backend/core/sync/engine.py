@@ -64,6 +64,8 @@ STATUS_TO_EVENT = {
 }
 EVENT_TO_STATUS = {"submitted": js.SUBMITTED_UNCONFIRMED, "confirmed": js.CONFIRMED,
                    "needs_human": js.NEEDS_HUMAN, "blocked": js.BLOCKED}
+# A job whose ledger ends in one of these is finished: never claimed (and applied) again.
+DONE_EVENTS = ("submitted", "confirmed", "needs_human", "blocked")
 # Compaction priority: email-confirmed > submitted > blocking > failed > claimed > queued.
 PRIORITY = {"confirmed": 6, "submitted": 5, "needs_human": 4, "blocked": 4, "failed": 2,
             "claimed": 1, "released": 1, "queued": 0}
@@ -261,6 +263,12 @@ class SyncEngine:
 
     def _pull(self, repo: GitRepo) -> list[str]:
         repo.fetch()
+        # Writes not committed yet (the layout files of a first run, a write whose commit was
+        # interrupted) would make git refuse the merge ("local changes would be overwritten"),
+        # or be wiped by the reset of a first-run repo with no HEAD. Commit them first so the
+        # normal per-file conflict rules apply.
+        if repo.dirty():
+            repo.commit_all(f"local changes from {self.label}")
         conflicts = repo.merge_remote()
         return self._resolve_conflicts(repo, conflicts) if conflicts else []
 
@@ -363,6 +371,17 @@ class SyncEngine:
                 self._pull(repo)
             except NetworkError:
                 offline = True
+            done = self.compact().get(key)
+            if done and done.get("event") in DONE_EVENTS:
+                # Another device (or a run of ours that crashed after submitting) already
+                # finished this job and released its lock. A free lock is not permission to
+                # apply again: report the outcome so the local queue catches up instead. The
+                # outcome is not ours to publish, so it is marked exported (no echo event).
+                st = self._state()
+                st.setdefault("exported", {})[key] = done["event"]
+                self._save_state(st)
+                return {"ok": False, "reason": "done_elsewhere", "event": done["event"],
+                        "status": EVENT_TO_STATUS[done["event"]], "holder": done.get("device")}
             cur = self.read_lock(key)
             if cur and cur.get("device") != self.device and not self._lock_expired(json.dumps(cur)):
                 return {"ok": False, "reason": "locked", "holder": cur.get("worker"), "until": cur.get("claimed_at")}
@@ -379,6 +398,14 @@ class SyncEngine:
             res = self._push(repo)
             mine = (self.read_lock(key) or {}).get("device") == self.device
             if not mine:
+                # Our "claimed" event was union-merged into the ledger before we saw the winner's
+                # lock. Retract it so the shared history shows one owner per job.
+                self.append_event(url, "released", job, reason="lost_race")
+                repo.commit_all(f"lost race for {key}")
+                try:
+                    self._push(repo)
+                except (github.GitHubError, GitError):
+                    pass  # queued; the next sync pushes it
                 return {"ok": False, "reason": "lost_race", "holder": (self.read_lock(key) or {}).get("worker")}
             self._remember_lock(key)
             return {"ok": True, "stale_recovered": stale, **({"offline": True} if res.get("offline") else {})}

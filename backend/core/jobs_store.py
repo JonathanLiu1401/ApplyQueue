@@ -165,19 +165,29 @@ def recover_stale_claims(jobs: dict) -> tuple[int, int]:
     return requeued, flagged
 
 
-def remote_claim(url: str, job: dict | None) -> bool:
-    """Cross-device claim through the sync repo's lock files (True when sync is off/offline)."""
+def remote_claim_result(url: str, job: dict | None) -> dict:
+    """Cross-device claim through the sync repo's lock files ({"ok": True} when sync is off/offline)."""
     try:
         try:
             from core.sync import claims
         except ImportError:  # pragma: no cover
             from backend.core.sync import claims
-        return claims.remote_claim(url, job)
+        return claims.remote_claim_result(url, job)
     except Exception:  # never let sync problems stop a single-device run
-        return True
+        return {"ok": True}
 
 
-def _revert_remote_claim(url: str) -> None:
+def remote_claim(url: str, job: dict | None) -> bool:
+    return bool(remote_claim_result(url, job).get("ok"))
+
+
+def _revert_remote_claim(url: str, res: dict | None = None) -> None:
+    res = res or {}
+    if res.get("reason") == "done_elsewhere" and res.get("status"):
+        # Finished on another device: take its outcome now, never leave it pending to retry.
+        update_job(url, status=res["status"], claimed_at=None, synced_from=res.get("holder"),
+                   synced_at=datetime.now(timezone.utc).isoformat())
+        return
     until = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() + REMOTE_BACKOFF_S, timezone.utc)
     update_job(url, status=js.PENDING, claimed_at=None, remote_claimed_until=until.isoformat())
 
@@ -203,8 +213,9 @@ def claim_job(url: str) -> bool:
         _stamp_claim(jobs[url])
         _save(jobs_file, jobs)
         job = dict(jobs[url])
-    if not remote_claim(url, job):
-        _revert_remote_claim(url)
+    res = remote_claim_result(url, job)
+    if not res.get("ok"):
+        _revert_remote_claim(url, res)
         return False
     return True
 
@@ -226,9 +237,10 @@ def claim_next_pending() -> dict | None:
                     break
         if picked is None:
             return None
-        if remote_claim(*picked):
+        res = remote_claim_result(*picked)
+        if res.get("ok"):
             return picked[1]
-        _revert_remote_claim(picked[0])
+        _revert_remote_claim(picked[0], res)
     return None
 
 

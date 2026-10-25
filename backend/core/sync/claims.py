@@ -15,15 +15,20 @@ def enabled() -> bool:
         return False
 
 
-def remote_claim(url: str, job: dict | None) -> bool:
+def remote_claim_result(url: str, job: dict | None) -> dict:
+    """{"ok": bool, ...}; a refusal may carry "status" (the job was finished on another device)."""
     if not enabled():
-        return True
+        return {"ok": True}
     try:
         from .engine import SyncEngine
         res = SyncEngine().try_lock(url, job)
     except Exception as e:  # offline, git missing, repo refused: keep single-device behaviour
         log.warning("sync lock skipped for %s: %s", url, type(e).__name__)
-        return True
+        return {"ok": True, "skipped": type(e).__name__}
     if not res.get("ok"):
-        log.info("job %s is claimed by %s", url, res.get("holder"))
-    return bool(res.get("ok"))
+        log.info("job %s is not ours: %s (%s)", url, res.get("reason"), res.get("holder"))
+    return res
+
+
+def remote_claim(url: str, job: dict | None) -> bool:
+    return bool(remote_claim_result(url, job).get("ok"))

@@ -42,7 +42,7 @@ fonts/
 
 # Lock files
 jobs.json.lock
-uv.lock
+# uv.lock is committed in ApplyQueue (reproducible sidecar builds; CI uses --frozen)
 
 # ── OS Files ──────────────────────────────────────────────────────────────
 .DS_Store

@@ -568,3 +568,93 @@ export async function saveEmailSettings(settings: Partial<EmailSettings>) {
 export async function sweepEmail() {
   return request<{ success: boolean } & EmailSweepSummary>("/email/sweep", { method: "POST" });
 }
+
+// ── Sync repo (M5) ─────────────────────────────────────────────────────
+export interface SyncConfig {
+  enabled: boolean;
+  kind: "github" | "git";
+  owner: string;
+  repo: string;
+  remote_url: string;
+  client_id: string;
+  sync_credentials: boolean;
+  sync_sessions: boolean;
+  encrypt_credentials: boolean;
+  device_name: string;
+  lock_ttl_s: number;
+  auto_minutes: number;
+}
+
+export interface SyncStatus {
+  configured: boolean;
+  kind: string;
+  owner: string;
+  repo: string;
+  device: string;
+  device_label: string;
+  git: boolean;
+  cloned: boolean;
+  github_linked: boolean;
+  encrypt_credentials: boolean;
+  sync_credentials: boolean;
+  has_key: boolean;
+  last_sync: string | null;
+  offline: boolean;
+  pending: number;
+  visibility_error: string | null;
+  verified_private_at: string | null;
+  held_locks: string[];
+  devices?: string[];
+  config: SyncConfig;
+}
+
+export async function getSyncStatus() {
+  return request<SyncStatus>("/sync/status");
+}
+
+export async function saveSyncConfig(cfg: Partial<SyncConfig>) {
+  return request<{ success: boolean; config: SyncConfig }>("/sync/config", {
+    method: "PUT",
+    body: JSON.stringify(cfg),
+  });
+}
+
+export async function startSyncDeviceFlow() {
+  return request<{ success: boolean; user_code: string; verification_uri: string; interval: number }>(
+    "/sync/github/device",
+    { method: "POST" }
+  );
+}
+
+export async function pollSyncDeviceFlow() {
+  return request<{ success: boolean; status: string; error?: string }>("/sync/github/poll", { method: "POST" });
+}
+
+export async function saveSyncToken(token: string) {
+  return request<{ success: boolean; login: string }>("/sync/github/token", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+export async function setupSyncRepo(name: string, create = true) {
+  return request<{ success: boolean }>("/sync/repo", { method: "POST", body: JSON.stringify({ name, create }) });
+}
+
+export async function syncNow() {
+  return request<{ success: boolean; pending?: number; offline?: boolean; refused?: string }>("/sync/now", {
+    method: "POST",
+  });
+}
+
+export async function unlinkSync() {
+  return request<{ success: boolean }>("/sync/unlink", { method: "POST" });
+}
+
+export async function exportSyncKey() {
+  return request<{ success: boolean; key: string }>("/sync/key");
+}
+
+export async function importSyncKey(key: string) {
+  return request<{ success: boolean; kid: string }>("/sync/key", { method: "POST", body: JSON.stringify({ key }) });
+}

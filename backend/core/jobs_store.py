@@ -75,31 +75,94 @@ def update_job(url: str, **fields) -> bool:
         return True
 
 
+REMOTE_BACKOFF_S = 15 * 60
+
+
+def remote_claim(url: str, job: dict | None) -> bool:
+    """Cross-device claim through the sync repo's lock files (True when sync is off/offline)."""
+    try:
+        try:
+            from core.sync import claims
+        except ImportError:  # pragma: no cover
+            from backend.core.sync import claims
+        return claims.remote_claim(url, job)
+    except Exception:  # never let sync problems stop a single-device run
+        return True
+
+
+def _revert_remote_claim(url: str) -> None:
+    until = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() + REMOTE_BACKOFF_S, timezone.utc)
+    update_job(url, status=js.PENDING, claimed_at=None, remote_claimed_until=until.isoformat())
+
+
+def _remote_backoff(job: dict) -> bool:
+    until = job.get("remote_claimed_until")
+    if not until:
+        return False
+    try:
+        return datetime.fromisoformat(until) > datetime.now(timezone.utc)
+    except ValueError:
+        return False
+
+
 def claim_job(url: str) -> bool:
-    """pending -> in_progress, atomically. False when someone else has it."""
+    """pending -> in_progress, atomically. False when someone else (or another device) has it."""
     jobs_file, lock = _paths()
     with _claim_lock, FileLock(str(lock)):
         jobs = _load(jobs_file)
-        if url in jobs and jobs[url].get("status") == js.PENDING:
-            jobs[url]["status"] = js.IN_PROGRESS
-            jobs[url]["claimed_at"] = datetime.now(timezone.utc).isoformat()
-            _save(jobs_file, jobs)
-            return True
+        if not (url in jobs and jobs[url].get("status") == js.PENDING):
+            return False
+        jobs[url]["status"] = js.IN_PROGRESS
+        jobs[url]["claimed_at"] = datetime.now(timezone.utc).isoformat()
+        _save(jobs_file, jobs)
+        job = dict(jobs[url])
+    if not remote_claim(url, job):
+        _revert_remote_claim(url)
         return False
+    return True
 
 
 def claim_next_pending() -> dict | None:
     """Claim the oldest pending job (used by hand-off mode, e.g. a Grok Bot run)."""
     jobs_file, lock = _paths()
-    with _claim_lock, FileLock(str(lock)):
+    for _ in range(25):
+        with _claim_lock, FileLock(str(lock)):
+            jobs = _load(jobs_file)
+            picked = None
+            for url, job in jobs.items():
+                if isinstance(job, dict) and job.get("status") == js.PENDING and not _remote_backoff(job):
+                    job["status"] = js.IN_PROGRESS
+                    job["claimed_at"] = datetime.now(timezone.utc).isoformat()
+                    _save(jobs_file, jobs)
+                    picked = (url, {**job, "url": job.get("url") or url})
+                    break
+        if picked is None:
+            return None
+        if remote_claim(*picked):
+            return picked[1]
+        _revert_remote_claim(picked[0])
+    return None
+
+
+def merge_from_sync(added: dict[str, dict], updates: dict[str, dict]) -> int:
+    """Apply jobs/status changes another device recorded in the sync repo. Never downgrades."""
+    if not added and not updates:
+        return 0
+    jobs_file, lock = _paths()
+    n = 0
+    with FileLock(str(lock)):
         jobs = _load(jobs_file)
-        for url, job in jobs.items():
-            if isinstance(job, dict) and job.get("status") == js.PENDING:
-                job["status"] = js.IN_PROGRESS
-                job["claimed_at"] = datetime.now(timezone.utc).isoformat()
-                _save(jobs_file, jobs)
-                return {**job, "url": job.get("url") or url}
-        return None
+        for url, job in added.items():
+            if url not in jobs:
+                jobs[url] = job
+                n += 1
+        for url, fields in updates.items():
+            if url in jobs and jobs[url].get("status") != js.IN_PROGRESS:
+                jobs[url].update(fields)
+                n += 1
+        if n:
+            _save(jobs_file, jobs)
+    return n
 
 
 def confirm_by_email(url: str, evidence: dict) -> tuple[bool, str]:

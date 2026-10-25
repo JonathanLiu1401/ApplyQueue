@@ -23,6 +23,8 @@ FORBIDDEN_FILENAMES = frozenset({
     "site_credentials.json",
     ".api_token",
     "llm_settings.json",
+    "github_token.json",    # the sync repo's own GitHub token (device-only)
+    "sync_key.json",        # optional sync encryption key (device-only)
 })
 
 _PATTERNS: dict[str, re.Pattern] = {
@@ -73,14 +75,29 @@ def scrub(text: str) -> str:
     return _TOKEN_KEYS.sub(lambda m: f'"{m.group(1)}": "[REDACTED]"', text)
 
 
-def check_sync_payload(rel_path: str, content: str | bytes) -> None:
-    """Raise SyncSecretError if writing *content* to *rel_path* in the sync repo is unsafe."""
+# A job portal's own signed-in session legitimately carries JWT cookies and access_token
+# fields (Art's ruling: portal sessions sync). Vendor/AI/email tokens are still refused.
+PORTAL_SESSION_ALLOWED = frozenset({"jwt", "oauth_token_field", "bearer_header"})
+
+
+def check_sync_payload(rel_path: str, content: str | bytes, *, portal_session: bool = False,
+                       scan_content: bool = True) -> None:
+    """Raise SyncSecretError if writing *content* to *rel_path* in the sync repo is unsafe.
+
+    ``portal_session`` relaxes only the generic JWT/access_token checks (the session sanitizer
+    has already dropped AI-vendor and mail-provider origins). ``scan_content=False`` is for
+    ciphertext whose plaintext was checked before encryption.
+    """
     name = Path(rel_path).name
     if name in FORBIDDEN_FILENAMES or name.endswith((".pem", ".key")):
         raise SyncSecretError(f"refusing to sync credential file {name!r}")
+    if not scan_content:
+        return
     if isinstance(content, bytes):
         content = content.decode("utf-8", errors="replace")
     kinds = find_tokens(content)
+    if portal_session:
+        kinds = [k for k in kinds if k not in PORTAL_SESSION_ALLOWED]
     if kinds:
         raise SyncSecretError(
             f"refusing to sync {rel_path!r}: looks like it contains {', '.join(kinds)} "
@@ -88,15 +105,40 @@ def check_sync_payload(rel_path: str, content: str | bytes) -> None:
         )
 
 
-def safe_sync_write(repo_root: Path, rel_path: str, content: str) -> Path:
-    """The only way M5 sync code may write into the sync repo working tree."""
+def _sync_target(repo_root: Path, rel_path: str) -> Path:
     root = Path(repo_root).resolve()
     target = (root / rel_path).resolve()
-    if root != target and root not in target.parents:
+    if root == target or root not in target.parents:
         raise SyncSecretError("path escapes the sync repo")
     if ".git" in target.relative_to(root).parts:
         raise SyncSecretError("refusing to write inside .git")
-    check_sync_payload(rel_path, content)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
     return target
+
+
+def safe_sync_write(repo_root: Path, rel_path: str, content: str, *, portal_session: bool = False,
+                    scan_content: bool = True) -> Path:
+    """The only way M5 sync code may write into the sync repo working tree."""
+    target = _sync_target(repo_root, rel_path)
+    check_sync_payload(rel_path, content, portal_session=portal_session, scan_content=scan_content)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with open(target, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(content)
+    return target
+
+
+def safe_sync_append(repo_root: Path, rel_path: str, line: str) -> Path:
+    """Append one JSON line (ledger/queue files are append-only and union-merged)."""
+    if "\n" in line:
+        raise SyncSecretError("ledger lines must be single-line JSON")
+    target = _sync_target(repo_root, rel_path)
+    check_sync_payload(rel_path, line)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with open(target, "a", encoding="utf-8", newline="\n") as fh:
+        fh.write(line + "\n")
+    return target
+
+
+def safe_sync_delete(repo_root: Path, rel_path: str) -> None:
+    target = _sync_target(repo_root, rel_path)
+    if target.exists():
+        target.unlink()

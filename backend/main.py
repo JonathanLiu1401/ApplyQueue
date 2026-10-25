@@ -67,6 +67,7 @@ async def lifespan(app: FastAPI):
     # Start parent-process watchdog (self-terminate if Tauri app dies)
     _start_parent_watchdog()
     _start_mail_sweeper()
+    _start_sync_loop()
     yield
     _mail_stop.set()
     # Graceful shutdown: stop running operations
@@ -1271,6 +1272,176 @@ async def email_sweep():
     summary = await asyncio.to_thread(mail_service.sweep)
     _mail_last_sweep.update(at=_time.time(), summary=summary)
     return {"success": True, **summary}
+
+
+# ── Sync repo (M5) ──────────────────────────────────────────────────────
+_sync_device_flow: dict = {}
+_SYNC_CONFIG_KEYS = ("client_id", "kind", "owner", "repo", "remote_url", "sync_credentials", "sync_sessions",
+                     "encrypt_credentials", "device_name", "auto_minutes", "lock_ttl_s", "enabled")
+
+
+def _sync():
+    from core.sync import crypto, github, store
+    from core.sync.engine import SyncEngine
+    return store, github, crypto, SyncEngine
+
+
+def _sync_err(e: Exception, code: int = 400):
+    return JSONResponse(status_code=code, content={"success": False, "error": str(e) or type(e).__name__})
+
+
+def _start_sync_loop():
+    def _loop():
+        store, _, _, SyncEngine = _sync()
+        last = 0.0
+        while not _mail_stop.wait(30):
+            try:
+                cfg = store.load_config()
+                if not cfg["enabled"] or _time.time() - last < max(1, int(cfg["auto_minutes"] or 5)) * 60:
+                    continue
+                last = _time.time()
+                SyncEngine(cfg).sync_now()
+            except Exception as e:  # never kill the sidecar
+                _log.warning(f"Sync failed: {type(e).__name__}")
+
+    threading.Thread(target=_loop, name="sync-loop", daemon=True).start()
+
+
+@app.get("/sync/status")
+async def sync_status():
+    store, _, _, SyncEngine = _sync()
+    cfg = store.load_config()
+    st = await asyncio.to_thread(lambda: SyncEngine(cfg).status())
+    return {**st, "config": cfg}
+
+
+@app.put("/sync/config")
+async def sync_config(body: dict):
+    store, _, _, _ = _sync()
+    cfg = store.load_config()
+    for k in _SYNC_CONFIG_KEYS:
+        if k in body:
+            cfg[k] = body[k]
+    if cfg["kind"] not in ("github", "git"):
+        return JSONResponse(status_code=400, content={"success": False, "error": "kind must be github or git"})
+    if cfg["kind"] == "git" and cfg.get("enabled") and not cfg.get("remote_url"):
+        return JSONResponse(status_code=400, content={"success": False, "error": "Enter a git remote URL"})
+    return {"success": True, "config": store.save_config(cfg)}
+
+
+@app.post("/sync/github/device")
+async def sync_device_start():
+    store, github, _, _ = _sync()
+    cfg = store.load_config()
+    try:
+        flow = await asyncio.to_thread(github.start_device_flow, cfg.get("client_id", ""))
+    except github.GitHubError as e:
+        return _sync_err(e)
+    _sync_device_flow.clear()
+    _sync_device_flow.update(flow, client_id=cfg["client_id"])
+    return {"success": True, "user_code": flow["user_code"], "verification_uri": flow["verification_uri"],
+            "interval": flow["interval"], "expires_at": flow["expires_at"]}
+
+
+@app.post("/sync/github/poll")
+async def sync_device_poll():
+    _, github, _, _ = _sync()
+    if not _sync_device_flow:
+        return JSONResponse(status_code=400, content={"success": False, "error": "Start the GitHub sign-in first"})
+    if _time.time() > _sync_device_flow["expires_at"]:
+        _sync_device_flow.clear()
+        return {"success": True, "status": "expired"}
+    try:
+        res = await asyncio.to_thread(github.poll_device_flow, _sync_device_flow["client_id"],
+                                      _sync_device_flow["device_code"])
+    except github.GitHubError as e:
+        return _sync_err(e)
+    if res["status"] in ("ok", "denied", "expired"):
+        _sync_device_flow.clear()
+    return {"success": True, **res}
+
+
+@app.post("/sync/github/token")
+async def sync_save_pat(body: dict):
+    _, github, _, _ = _sync()
+    try:
+        github.save_pat(str(body.get("token") or ""))
+        user = await asyncio.to_thread(github.current_user)
+    except github.GitHubError as e:
+        return _sync_err(e)
+    return {"success": True, "login": user.get("login")}
+
+
+@app.post("/sync/repo")
+async def sync_repo(body: dict):
+    """Create (private) or adopt the state repo, verify it is private, clone and first sync."""
+    store, github, _, SyncEngine = _sync()
+    name = str(body.get("name") or "applyqueue-state").strip()
+    if not name or "/" in name or len(name) > 100:
+        return JSONResponse(status_code=400, content={"success": False, "error": "Invalid repository name"})
+
+    def _do():
+        owner = github.current_user()["login"]
+        existing = github.get_repo(owner, name)
+        if existing is None:
+            if not body.get("create", True):
+                raise github.GitHubError("Repository not found.")
+            github.create_private_repo(name)
+        info = github.verify_private(owner, name)
+        cfg = {**store.load_config(), "kind": "github", "owner": owner, "repo": name, "remote_url": "", "enabled": True}
+        store.save_config(cfg)
+        return info, SyncEngine(cfg).sync_now()
+
+    try:
+        info, result = await asyncio.to_thread(_do)
+    except github.NotPrivate as e:
+        return _sync_err(e, 409)
+    except github.GitHubError as e:
+        return _sync_err(e)
+    except Exception as e:  # git missing, etc.
+        return _sync_err(e, 500)
+    return {"success": True, "repo": info, "result": result}
+
+
+@app.post("/sync/now")
+async def sync_now():
+    store, github, _, SyncEngine = _sync()
+    cfg = store.load_config()
+    if not cfg["enabled"]:
+        return JSONResponse(status_code=400, content={"success": False, "error": "Sync is not set up"})
+    try:
+        result = await asyncio.to_thread(lambda: SyncEngine(cfg).sync_now())
+    except Exception as e:
+        return _sync_err(e, 500)
+    return {"success": bool(result.get("ok")), **result}
+
+
+@app.post("/sync/unlink")
+async def sync_unlink():
+    store, _, _, _ = _sync()
+    store.clear_token()
+    store.save_config({**store.load_config(), "enabled": False})
+    return {"success": True}
+
+
+@app.get("/sync/key")
+async def sync_export_key():
+    _, _, crypto, _ = _sync()
+    try:
+        crypto.ensure_key()
+        return {"success": True, "key": crypto.export_key()}
+    except crypto.KeyMissing as e:
+        return _sync_err(e)
+
+
+@app.post("/sync/key")
+async def sync_import_key(body: dict):
+    _, _, crypto, _ = _sync()
+    try:
+        kid = crypto.import_key(str(body.get("key") or ""))
+    except (ValueError, TypeError) as e:
+        return _sync_err(e)
+    return {"success": True, "kid": kid}
 
 
 @app.post("/apply/stop")

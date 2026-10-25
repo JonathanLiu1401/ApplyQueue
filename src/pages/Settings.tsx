@@ -13,6 +13,7 @@ import { LANGUAGE_NAMES, getSavedLanguage, saveLanguagePreference } from "../i18
 import { loadLanguage } from "../i18n";
 import AgentBackendsSection from "../components/settings/AgentBackendsSection";
 import EmailAccountsSection from "../components/settings/EmailAccountsSection";
+import SyncSection from "../components/settings/SyncSection";
 
 export default function SettingsPage() {
   const later = useSafeTimeout();
@@ -244,6 +245,7 @@ export default function SettingsPage() {
       <AgentBackendsSection />
 
       <EmailAccountsSection />
+      <SyncSection />
 
       {/* Privacy & Telemetry */}
       <Section title="Privacy & Telemetry">

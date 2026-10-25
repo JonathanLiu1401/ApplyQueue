@@ -841,3 +841,63 @@ class TestEmailApi:
         assert r["settings"]["confirm_label"] == "Job Hunt" and r["settings"]["sweep_minutes"] == 2
         assert auth_client.get("/email/settings").json()["archive_confirmations"] is False
         assert auth_client.post("/email/sweep").status_code == 400
+
+
+class TestSyncApi:
+    """M5 endpoints against the mocked GitHub API and a local bare remote."""
+
+    @pytest.fixture
+    def gh(self, tmp_path, monkeypatch):
+        import shutil
+        import subprocess
+        import sys as _sys
+        from pathlib import Path as _P
+        if shutil.which("git") is None:
+            pytest.skip("git not installed")
+        _sys.path.insert(0, str(_P(__file__).resolve().parents[1] / "fixtures"))
+        from mock_github import MockGitHub
+        from core.sync import github
+        m = MockGitHub()
+        monkeypatch.setattr(github, "WEB", m.url)
+        monkeypatch.setattr(github, "API", m.url)
+        bare = tmp_path / "state.git"
+        subprocess.run(["git", "init", "--bare", "-q", str(bare)], check=True)
+        monkeypatch.setattr(github, "https_remote", lambda o, r: str(bare))
+        yield m
+        m.close()
+
+    def test_device_flow_create_and_sync(self, auth_client, gh):
+        assert auth_client.post("/sync/github/device").status_code == 400  # no client id
+        auth_client.put("/sync/config", json={"client_id": "Iv1.example", "device_name": "laptop"})
+        r = auth_client.post("/sync/github/device").json()
+        assert r["user_code"] == "ABCD-1234"
+        assert auth_client.post("/sync/github/poll").json()["status"] == "pending"
+        assert auth_client.post("/sync/github/poll").json()["status"] == "ok"
+        st = auth_client.get("/sync/status").json()
+        assert st["github_linked"] and not st["configured"]
+        assert "access_token" not in str(st)
+        r = auth_client.post("/sync/repo", json={"name": "applyqueue-state"})
+        assert r.status_code == 200, r.text
+        assert r.json()["repo"]["private"] is True
+        assert gh.repos["alex-example/applyqueue-state"]["private"] is True
+        st = auth_client.get("/sync/status").json()
+        assert st["configured"] and st["cloned"] and st["owner"] == "alex-example"
+        assert auth_client.post("/sync/now").json()["ok"] is True
+
+    def test_public_repo_refused(self, auth_client, gh):
+        from mock_github import FAKE_TOKEN
+        from core.sync import store
+        store.save_token({"access_token": FAKE_TOKEN})
+        gh.repos["alex-example/oops"] = {"name": "oops", "private": False, "visibility": "public",
+                                         "permissions": {"push": True}}
+        r = auth_client.post("/sync/repo", json={"name": "oops", "create": False})
+        assert r.status_code == 409 and "public" in r.json()["error"]
+        assert auth_client.get("/sync/status").json()["configured"] is False
+
+    def test_key_export_import_and_unlink(self, auth_client, gh):
+        k = auth_client.get("/sync/key").json()["key"]
+        assert k.startswith("aqk1.")
+        assert auth_client.post("/sync/key", json={"key": "nope"}).status_code == 400
+        assert auth_client.post("/sync/key", json={"key": k}).json()["success"]
+        assert auth_client.post("/sync/unlink").json()["success"]
+        assert auth_client.post("/sync/now").status_code == 400

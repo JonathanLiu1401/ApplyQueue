@@ -1,0 +1,390 @@
+"""M5: private GitHub sync repo — against a local bare remote and a mocked GitHub API."""
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "fixtures"))
+from mock_github import FAKE_TOKEN, MockGitHub  # noqa: E402
+
+from core import job_status as js  # noqa: E402
+from core import jobs_store, token_guard  # noqa: E402
+from core.credential_vault import CredentialVault  # noqa: E402
+from core.sync import crypto, github, store  # noqa: E402
+from core.sync.engine import SyncEngine, job_key, sanitize_storage_state  # noqa: E402
+
+pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
+
+FULL = "alex-example/applyqueue-state"
+JOB_A = "https://boards.greenhouse.io/examplerobotics/jobs/1"
+JOB_B = "https://jobs.lever.co/acmewidgets/2"
+
+
+def git(*args, cwd):
+    return subprocess.run(["git", "-c", "init.defaultBranch=main", *args], cwd=cwd, check=True,
+                          capture_output=True, text=True,
+                          env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+                               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}).stdout
+
+
+class World:
+    def __init__(self, tmp: Path, monkeypatch, gh: MockGitHub):
+        self.tmp, self.mp, self.gh = tmp, monkeypatch, gh
+        self.remote = tmp / "remote.git"
+        git("init", "--bare", "-q", "-b", "main", str(self.remote), cwd=tmp)
+        seed = tmp / "seed"
+        git("clone", "-q", str(self.remote), str(seed), cwd=tmp)
+        (seed / "README.md").write_text("# applyqueue-state\n")
+        git("add", "-A", cwd=seed)
+        git("commit", "-q", "-m", "init", cwd=seed)
+        git("push", "-q", "origin", "HEAD:main", cwd=seed)
+        gh.repos[FULL] = {"name": "applyqueue-state", "private": True, "visibility": "private", "fork": False,
+                          "permissions": {"push": True}}
+
+    def use(self, dev: str, **cfg):
+        d = self.tmp / dev
+        self.mp.setenv("APPLYQUEUE_DATA_DIR", str(d))
+        if not (d / "sync" / "config.json").exists():
+            store.save_config({**store.DEFAULT_CONFIG, "enabled": True, "owner": "alex-example",
+                               "repo": "applyqueue-state", "remote_url": str(self.remote),
+                               "device_name": dev, **cfg})
+            store.save_token({"access_token": FAKE_TOKEN, "source": "test"})
+        elif cfg:
+            store.save_config({**store.load_config(), **cfg})
+        return SyncEngine()
+
+    def remote_file(self, rel: str) -> str | None:
+        out = subprocess.run(["git", "--git-dir", str(self.remote), "show", f"main:{rel}"],
+                             capture_output=True, text=True)
+        return out.stdout if out.returncode == 0 else None
+
+    def remote_tree(self) -> list[str]:
+        return subprocess.run(["git", "--git-dir", str(self.remote), "ls-tree", "-r", "--name-only", "main"],
+                              capture_output=True, text=True, check=True).stdout.split()
+
+
+@pytest.fixture
+def world(tmp_path, monkeypatch):
+    gh = MockGitHub()
+    monkeypatch.setattr(github, "WEB", gh.url)
+    monkeypatch.setattr(github, "API", gh.url)
+    monkeypatch.delitem(sys.modules, "core.shared_config", raising=False)
+    yield World(tmp_path, monkeypatch, gh)
+    gh.close()
+
+
+def add_job(url, status=js.PENDING, **kw):
+    jobs_file, lock = jobs_store._paths()
+    jobs = jobs_store._load(jobs_file)
+    jobs[url] = {"url": url, "title": "Robotics Engineer", "company": "Example Robotics", "status": status, **kw}
+    jobs_store._save(jobs_file, jobs)
+
+
+# ── GitHub device flow + repo ──
+def test_device_flow_and_private_repo(world, tmp_path, monkeypatch):
+    monkeypatch.setenv("APPLYQUEUE_DATA_DIR", str(tmp_path / "fresh"))
+    with pytest.raises(github.GitHubError):
+        github.start_device_flow("")
+    flow = github.start_device_flow("Iv1.example")
+    assert flow["user_code"] == "ABCD-1234"
+    assert github.poll_device_flow("Iv1.example", flow["device_code"])["status"] == "pending"
+    assert github.poll_device_flow("Iv1.example", flow["device_code"])["status"] == "ok"
+    tf = store.token_file()
+    assert json.loads(tf.read_text())["access_token"] == FAKE_TOKEN
+    if os.name != "nt":
+        assert (tf.stat().st_mode & 0o777) == 0o600
+    assert github.current_user()["login"] == "alex-example"
+    repo = github.create_private_repo("applyqueue-state-2")
+    assert repo["private"] is True
+    assert github.verify_private("alex-example", "applyqueue-state-2")["private"] is True
+    world.gh.set_visibility("alex-example/applyqueue-state-2", "public")
+    with pytest.raises(github.NotPrivate):
+        github.verify_private("alex-example", "applyqueue-state-2")
+    world.gh.set_visibility("alex-example/applyqueue-state-2", "internal")
+    with pytest.raises(github.NotPrivate):
+        github.verify_private("alex-example", "applyqueue-state-2")
+    with pytest.raises(github.NotPrivate):
+        github.verify_private("JonathanLiu1401", "ApplyQueue")  # the app repo is never a state repo
+
+
+def test_device_flow_denied(world, tmp_path, monkeypatch):
+    monkeypatch.setenv("APPLYQUEUE_DATA_DIR", str(tmp_path / "fresh"))
+    world.gh.deny = True
+    assert github.poll_device_flow("Iv1.example", "dev-123")["status"] == "denied"
+    assert not store.token_file().exists()
+
+
+# ── layout, ledger, union merge ──
+def test_layout_and_union_merge_two_devices(world):
+    a = world.use("laptop")
+    add_job(JOB_A)
+    ra = a.sync_now()
+    assert ra["ok"] and ra["pushed"]
+    assert world.remote_file(".gitattributes").strip() == "*.jsonl merge=union"
+    assert "must stay private" in world.remote_file("README.md")
+
+    b = world.use("desktop")
+    add_job(JOB_B)
+    rb = b.sync_now()
+    assert rb["imported"]["added"] == 1           # desktop received the laptop's posting
+    assert JOB_A in jobs_store.read_jobs()
+
+    # Both append concurrently: laptop commits without pulling, desktop pushes first.
+    world.use("laptop")
+    jobs_store.update_job(JOB_A, status=js.SUBMITTED_UNCONFIRMED)
+    world.use("desktop")
+    jobs_store.update_job(JOB_B, status=js.NEEDS_HUMAN)
+    world.use("desktop").sync_now()
+    r = world.use("laptop").sync_now()
+    assert r["pushed"]
+    ledger = [json.loads(ln) for ln in world.remote_file("ledger/applications.jsonl").splitlines()]
+    events = {(e["job_key"], e["event"]) for e in ledger}
+    assert (job_key(JOB_A), "submitted") in events and (job_key(JOB_B), "needs_human") in events
+    assert len({e["id"] for e in ledger}) == len(ledger)
+    # laptop now sees the desktop's needs_human, and vice versa after its next sync
+    assert jobs_store.get_job(JOB_B)["status"] == js.NEEDS_HUMAN
+    world.use("desktop").sync_now()
+    assert jobs_store.get_job(JOB_A)["status"] == js.SUBMITTED_UNCONFIRMED
+    assert {"workers/" + store.device_id() + ".json"} <= set(world.remote_tree())
+
+
+def test_import_never_downgrades(world):
+    a = world.use("laptop")
+    add_job(JOB_A, status=js.CONFIRMED)
+    a.sync_now()
+    b = world.use("desktop")
+    add_job(JOB_A, status=js.PENDING)
+    b.sync_now()
+    assert jobs_store.get_job(JOB_A)["status"] == js.CONFIRMED
+    world.use("laptop")
+    jobs_store.update_job(JOB_A, status=js.PENDING)  # hand edit; remote state stays confirmed
+    b.sync_now()
+    assert jobs_store.get_job(JOB_A)["status"] == js.CONFIRMED
+
+
+def test_job_key_ignores_tracking():
+    assert job_key(JOB_A + "?utm_source=x&gh_src=y") == job_key(JOB_A) == job_key(JOB_A.replace("https://", "https://www.") + "/")
+    assert job_key(JOB_A) != job_key(JOB_B)
+    assert job_key("https://example.com/viewjob?jk=1") != job_key("https://example.com/viewjob?jk=2")
+
+
+# ── locks ──
+def test_lock_contention_and_claim_hook(world):
+    a = world.use("laptop")
+    add_job(JOB_A)
+    a.sync_now()
+    assert jobs_store.claim_job(JOB_A) is True      # goes through the sync lock
+    lock = json.loads(world.remote_file(f"locks/{job_key(JOB_A)}.json"))
+    assert lock["worker"] == "laptop" and lock["ttl_sec"] == 7200
+
+    world.use("desktop").sync_now()
+    assert jobs_store.get_job(JOB_A)["status"] == js.PENDING
+    res = SyncEngine().try_lock(JOB_A)
+    assert res == {"ok": False, "reason": "locked", "holder": "laptop", "until": lock["claimed_at"]}
+    assert jobs_store.claim_job(JOB_A) is False
+    job = jobs_store.get_job(JOB_A)
+    assert job["status"] == js.PENDING and job["remote_claimed_until"]
+    assert jobs_store.claim_next_pending() is None   # backed off, not re-tried in a loop
+
+
+def test_lock_race_lost_on_push(world):
+    world.use("laptop").sync_now()
+    b = world.use("desktop")
+    b.sync_now()
+    assert world.use("laptop").try_lock(JOB_A)["ok"]
+    b = world.use("desktop")
+    real_pull = b._pull
+    calls = {"n": 0}
+
+    def stale_pull(repo):  # desktop does not see the laptop's lock before writing its own
+        calls["n"] += 1
+        return [] if calls["n"] == 1 else real_pull(repo)
+    b._pull = stale_pull
+    res = b.try_lock(JOB_A)
+    assert res["ok"] is False and res["reason"] == "lost_race"
+    assert json.loads(world.remote_file(f"locks/{job_key(JOB_A)}.json"))["worker"] == "laptop"
+
+
+def test_stale_lock_recovery_and_release(world):
+    a = world.use("laptop", lock_ttl_s=1)
+    add_job(JOB_A)
+    a.sync_now()
+    assert a.try_lock(JOB_A)["ok"]
+    time.sleep(1.2)
+    b = world.use("desktop")
+    res = b.try_lock(JOB_A)
+    assert res["ok"] and res["stale_recovered"]
+    assert json.loads(world.remote_file(f"locks/{job_key(JOB_A)}.json"))["worker"] == "desktop"
+    # finishing the job releases the lock on the next sync
+    jobs_store.update_job(JOB_A, status=js.SUBMITTED_UNCONFIRMED)
+    assert b.sync_now()["released"] == 1
+    assert world.remote_file(f"locks/{job_key(JOB_A)}.json") is None
+
+
+# ── offline queueing ──
+def test_offline_queue_and_resync(world):
+    a = world.use("laptop")
+    add_job(JOB_A)
+    a.sync_now()
+    hidden = world.remote.with_name("remote.offline")
+    world.remote.rename(hidden)
+    try:
+        jobs_store.update_job(JOB_A, status=js.SUBMITTED_UNCONFIRMED)
+        r = a.sync_now()
+        assert r["offline"] and r["pending"] >= 1
+        assert a.try_lock(JOB_B)["offline"] is True  # offline claims are allowed and queued
+        assert a.status()["pending"] >= 2
+    finally:
+        hidden.rename(world.remote)
+    r = a.sync_now()
+    assert r["pushed"] and r["pending"] == 0
+    assert "submitted" in world.remote_file("ledger/applications.jsonl")
+
+
+def test_first_run_offline_then_publish(world):
+    hidden = world.remote.with_name("remote.offline")
+    world.remote.rename(hidden)
+    a = world.use("laptop")
+    add_job(JOB_A)
+    assert a.sync_now()["offline"]
+    hidden.rename(world.remote)
+    assert a.sync_now()["pushed"]
+    assert "must stay private" in world.remote_file("README.md")
+    assert world.remote_file("ledger/applications.jsonl")
+
+
+# ── visibility gate ──
+def test_public_repo_refuses_push_and_credentials(world):
+    a = world.use("laptop")
+    vault = CredentialVault.default()
+    vault.get_or_create("boards.greenhouse.io", "alex@example.com")
+    world.gh.set_visibility(FULL, "public")
+    before = world.gh.visibility_checks(FULL)
+    r = a.sync_now()
+    assert r["ok"] is False and "public" in r["refused"]
+    assert "public" in r["credentials"]["refused"]
+    assert world.gh.visibility_checks(FULL) >= before + 2   # credentials write + push both checked
+    assert world.remote_file("credentials/portals.json") is None
+    assert world.remote_file("ledger/applications.jsonl") is None   # nothing pushed at all
+    assert a.status()["visibility_error"]
+    assert not (store.repo_dir() / "credentials" / "portals.json").exists()
+    world.gh.set_visibility(FULL, "private")
+    assert a.sync_now()["pushed"]
+    assert world.remote_file("credentials/portals.json")
+
+
+def test_plain_git_remote_never_gets_credentials(world):
+    a = world.use("laptop", kind="git")
+    CredentialVault.default().get_or_create("boards.greenhouse.io", "alex@example.com")
+    r = a.sync_now()
+    assert r["pushed"] and "credentials" not in r
+    assert world.remote_file("credentials/portals.json") is None
+    assert a.save_session("default", {"cookies": []})["saved"] == "local"
+
+
+# ── credentials: LWW merge, mirror, encryption ──
+def test_credentials_mirror_and_lww_conflict(world):
+    a = world.use("laptop")
+    va = CredentialVault.default()
+    pa, _ = va.get_or_create("boards.greenhouse.io", "alex@example.com")
+    a.sync_now()
+    b = world.use("desktop")
+    b.sync_now()
+    vb = CredentialVault.default()
+    assert vb.get("boards.greenhouse.io")["password"] == pa["password"]
+    assert vb.get("boards.greenhouse.io")["source"] == "sync"
+
+    # concurrent edits: laptop changes greenhouse (newer), desktop adds lever
+    world.use("laptop")
+    va.upsert_synced({"boards.greenhouse.io": {"username": "alex@example.com", "password": "New-Pass-1!",
+                                               "updated_at": "2099-01-01T00:00:00+00:00"}})
+    world.use("desktop")
+    vb.get_or_create("jobs.lever.co", "alex@example.com")
+    world.use("laptop").sync_now()
+    world.use("desktop").sync_now()   # rejected push -> portals.json merge conflict -> LWW per id
+    portals = {e["id"]: e for e in json.loads(world.remote_file("credentials/portals.json"))}
+    assert portals["boards.greenhouse.io"]["password"] == "New-Pass-1!"
+    assert "jobs.lever.co" in portals
+    assert vb.get("boards.greenhouse.io")["password"] == "New-Pass-1!"
+    world.use("laptop").sync_now()
+    assert va.get("jobs.lever.co")
+
+
+def test_optional_encryption(world):
+    a = world.use("laptop", encrypt_credentials=True)
+    CredentialVault.default().get_or_create("boards.greenhouse.io", "alex@example.com")
+    pw = CredentialVault.default().get("boards.greenhouse.io")["password"]
+    a.sync_now()
+    key = crypto.export_key()
+    assert world.remote_file("credentials/portals.json") is None
+    blob = world.remote_file("credentials/portals.json.enc")
+    assert blob and pw not in blob and "alex@example.com" not in blob
+
+    b = world.use("desktop", encrypt_credentials=True)
+    r = b.sync_now()   # no key yet: credentials error, rest of sync still works
+    assert "sync key" in r["credentials"]["error"] and r["pushed"]
+    crypto.import_key(key)
+    b.sync_now()
+    assert CredentialVault.default().get("boards.greenhouse.io")["password"] == pw
+
+
+def test_encryption_off_by_default():
+    assert store.DEFAULT_CONFIG["encrypt_credentials"] is False
+    assert store.DEFAULT_CONFIG["sync_credentials"] is True
+
+
+# ── sessions + token guard ──
+def test_session_sanitized_and_synced(world):
+    a = world.use("laptop")
+    a.sync_now()
+    jwt = "eyJ" + "a" * 12 + "." + "b" * 12 + "." + "c" * 12
+    state = {"cookies": [{"domain": ".greenhouse.io", "name": "_session", "value": jwt},
+                         {"domain": ".google.com", "name": "SID", "value": "x"},
+                         {"domain": "chatgpt.com", "name": "s", "value": "y"},
+                         {"domain": "login.microsoftonline.com", "name": "e", "value": "z"}],
+             "origins": [{"origin": "https://boards.greenhouse.io", "localStorage": [{"name": "access_token", "value": "p" * 20}]},
+                         {"origin": "https://claude.ai", "localStorage": []}]}
+    r = a.save_session("default", state)
+    assert r["saved"] == "repo" and r["cookies"] == 1
+    saved = json.loads(world.remote_file("sessions/default/storage.json"))
+    assert [c["domain"] for c in saved["cookies"]] == [".greenhouse.io"]
+    assert [o["origin"] for o in saved["origins"]] == ["https://boards.greenhouse.io"]
+    b = world.use("desktop")
+    b.sync_now()
+    assert b.load_session("default")["cookies"][0]["value"] == jwt
+
+
+def test_session_with_vendor_key_refused(world):
+    a = world.use("laptop")
+    leaked = "sk-" + "proj-" + "Q" * 30
+    with pytest.raises(token_guard.SyncSecretError):
+        a.save_session("default", {"cookies": [{"domain": "jobs.example.com", "name": "k", "value": leaked}]})
+
+
+def test_ledger_rejects_tokens_and_github_token_never_in_repo(world):
+    a = world.use("laptop")
+    a.ensure_repo()
+    with pytest.raises(token_guard.SyncSecretError):
+        a.append_event(JOB_A, "queued", {"title": "x " + "xai-" + "Z" * 24})
+    codex = json.dumps({"tokens": {"id_token": "a", "access_token": "b"}, "last_refresh": "now"})
+    with pytest.raises(token_guard.SyncSecretError):
+        token_guard.safe_sync_write(store.repo_dir(), "notes/auth-copy.json", codex)
+    for name in ("github_token.json", "sync_key.json", "site_credentials.json", "email_tokens.json"):
+        with pytest.raises(token_guard.SyncSecretError):
+            token_guard.safe_sync_write(store.repo_dir(), f"x/{name}", "{}")
+    add_job(JOB_A)
+    a.sync_now()
+    for p in store.repo_dir().rglob("*"):
+        if p.is_file():
+            assert FAKE_TOKEN not in p.read_text(encoding="utf-8", errors="replace"), p
+
+
+def test_sanitize_storage_state_drops_mail_and_ai():
+    s = sanitize_storage_state({"cookies": [{"domain": "mail.google.com"}, {"domain": "x.ai"},
+                                            {"domain": "myworkdayjobs.com"}], "origins": []})
+    assert s["cookies"] == [{"domain": "myworkdayjobs.com"}]

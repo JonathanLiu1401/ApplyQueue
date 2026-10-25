@@ -145,6 +145,33 @@ class CredentialVault:
             for h, e in sorted(data["sites"].items())
         ]
 
+    def all_entries(self) -> dict[str, dict]:
+        """Every per-site entry, passwords included (sync engine only)."""
+        with self._lock:
+            return {h: dict(e) for h, e in self._read()["sites"].items()}
+
+    def upsert_synced(self, entries: dict[str, dict]) -> int:
+        """Merge entries from the sync repo: per host, the newer ``updated_at`` wins."""
+        changed = 0
+        with self._lock:
+            data = self._read()
+            for host, e in entries.items():
+                if not host or not e.get("password"):
+                    continue
+                h = normalize_host(host)
+                cur = data["sites"].get(h)
+                if cur and (cur.get("updated_at") or cur.get("created_at") or "") >= (e.get("updated_at") or ""):
+                    continue
+                data["sites"][h] = {"username": e.get("username", ""), "password": e["password"],
+                                    "created_at": (cur or {}).get("created_at") or e.get("updated_at") or _now(),
+                                    "updated_at": e.get("updated_at") or _now(),
+                                    "source": "sync", **({"login_url": e["login_url"]} if e.get("login_url") else {}),
+                                    **({"sign_in_with": e["sign_in_with"]} if e.get("sign_in_with") else {})}
+                changed += 1
+            if changed:
+                self._write(data)
+        return changed
+
     def has_legacy_shared(self) -> bool:
         with self._lock:
             return bool((self._read().get(LEGACY_KEY) or {}).get("password"))

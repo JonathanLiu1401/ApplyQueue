@@ -198,7 +198,7 @@ the default is 1 concurrent job per CLI backend, with backoff on rate-limit erro
 | **M2** | **Answer every question + fix #89** | Remove "skip after 5 steps"; `form.unanswered_fields()` must be empty before submit; every question (optional included) is answered truthfully from profile/QA, EEO may use "decline to self-identify", and unknowns go to `ask_user` instead of being invented. `applied` requires a confirmation page + no failing submit POST (CDP) + an email proof when available; otherwise `submitted_unconfirmed`/`needs_human`/`failed`. Generated ATS passwords are stored before use. Fixture ATS pages + tests. |
 | **M3** | **Subscription CLI backends** | MCP server (`browser/form/email/queue`), adapters for Grok Build, Cursor CLI, Codex (`exec` + "Sign in with ChatGPT", token kept in the OS keychain / CLI store only, plus a sync-write guard test rejecting Codex/ChatGPT tokens), Claude Code (opt-in behind a terms warning, unmodified CLI under the user's own login, token never touched), each with an install/login check and stream-json parsing; API keys stay the default for Claude and Codex; Grok Bot setup prompt; Gemini = API key only; API keys + Ollama untouched. |
 | **M4** | **Gmail + Outlook confirmation tracking** | Gmail API + Microsoft Graph OAuth (user's own consent, local tokens for *email* only); OTP retrieval tool; confirmation matching + labels (`ApplyQueue/Applied`, `…/Rejected`, `…/Interview`); weekly one-click Google re-auth reminder; recruiter emails off by default, drafts only. |
-| **M5** | **Private GitHub sync repo** | Queue/ledger/QA/credentials/sessions sync via the user's own private repo; app verifies `private=true` via the GitHub API and **refuses** public repos (and re-checks before each push); sync writes reject Codex/ChatGPT and other subscription OAuth tokens (§3.2); claim locks across machines/agents; encryption as an optional setting (not approved yet). |
+| **M5** | **Private GitHub sync repo** | Queue/ledger/QA/credentials/sessions sync via the user's own private repo; app verifies `private=true` via the GitHub API and **refuses** public repos (and re-checks before each push); sync writes reject Codex/ChatGPT and other subscription OAuth tokens (§3.2); claim locks across machines/agents; encryption as an optional setting (off by default; Art approved credentials+sessions in the private repo). |
 | **M6** | **Local models as headline** | Detect Ollama / LM Studio / llama.cpp / vLLM; hardware probe (VRAM/RAM/Apple silicon); vision-model recommender; one-click pull with progress; overnight mode. |
 | **M7** | **LoopCV-style searches** | Saved searches with schedules and stats (found/applied/verified/replies), review-first vs automatic mode per search, user-defined job domains (starter packs in `docs/examples/packs/`). |
 | **M8** | **Full e2e + break-it suite** | Fixture ATS sites + real-browser e2e on **macOS Apple silicon, macOS Intel (x86_64, `macos-15-intel`), Windows x64 and Linux x64**, run against the *packaged* app of each platform, chaos cases (500 on submit, CAPTCHAs, expired sessions, OTP, required/optional fields, crash/resume, duplicate claims, public-repo refusal); `TEST_REPORT.md` (plan in §4.3). |
@@ -308,6 +308,27 @@ M1 checklist (updated with each M1 commit):
 - [x] Mock OAuth/Gmail/Graph server (`tests/fixtures/mock_mail_server.py`) + API/UI tests.
 - [ ] Rejection/interview labels and recruiter drafts: deferred (not in this milestone's brief).
 - Setup notes: `docs/applyqueue/EMAIL_SETUP.md`.
+
+### 5.4 M5 status (private GitHub sync repo)
+- [x] Sign-in with the user's own GitHub OAuth App (device flow; client ID user-supplied, no
+  ApplyQueue-registered app) or a fine-grained PAT; token in `<data>/vault/github_token.json`
+  (0600, never in the repo, `.git/config` or argv: passed as an `http.extraheader` env value).
+- [x] Repo created private (`POST /user/repos private=true`) or reused; `private==true` and
+  `visibility=="private"` verified via the API **before every push and every credential/session
+  write**; public/internal repos and the app's own repos are refused (sync pauses, logins stay local).
+- [x] Layout: `queue/postings/YYYY-MM.jsonl`, `ledger/events-YYYY-MM.jsonl` (append-only,
+  `merge=union`, dedupe on id), `locks/<job_key>.json` (TTL, stale-lock takeover),
+  `credentials/portals.json` (LWW per entry), `sessions/<id>.json` (sanitized: AI/email/GitHub
+  origins dropped), `workers/<device>.json` heartbeats. Optional AES-256-GCM for credentials and
+  sessions (off by default; key export/import per device).
+- [x] Offline: commits queue locally and push on reconnect; non-fast-forward → fetch/merge/retry;
+  conflicts resolved per file type. `claim_job` takes a remote lock, so two devices/agents never
+  apply to the same posting; losers back off 15 min.
+- [x] Token guard on every sync write (vendor/AI/email/Codex/ChatGPT tokens refused; portal
+  JWTs allowed only inside session files). Plain `git` remotes never get credentials.
+- [x] MCP `save_session`; synced cookies restored on browser launch.
+- [x] Tests: local bare remote + mocked GitHub API (`tests/fixtures/mock_github.py`).
+- Setup notes: `docs/applyqueue/SYNC_SETUP.md`.
 
 ## 6. Guardrails (unchanged)
 Private repo only; no GitHub fork; no upstream PRs, publishing, domains, or npm names without

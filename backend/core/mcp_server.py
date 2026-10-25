@@ -159,9 +159,27 @@ class Browser:
             )
             self.context.on("page", self._on_new_page)
             self.context.on("response", self._on_response)
+            await self._restore_synced_session()
         pages = [p for p in self.context.pages if not p.is_closed()]
         self.page = pages[-1] if pages else await self.context.new_page()
         return self.page
+
+    async def _restore_synced_session(self):
+        """Add portal cookies another device saved to the private sync repo (best-effort)."""
+        try:
+            try:
+                from core.sync import claims
+                from core.sync.engine import SyncEngine
+            except ImportError:  # pragma: no cover
+                from backend.core.sync import claims
+                from backend.core.sync.engine import SyncEngine
+            if not claims.enabled():
+                return
+            sess = await asyncio.to_thread(SyncEngine().load_session, "default")
+            if sess and sess.get("cookies"):
+                await self.context.add_cookies(sess["cookies"])
+        except Exception:
+            pass
 
     def _on_new_page(self, page):
         self.page = page  # follow popups / target=_blank like a person would
@@ -620,6 +638,19 @@ class ApplyQueueTools:
                 await loc.click(timeout=5000)
                 await loc.press_sequentially(value, delay=15)
             return {"filled": secret, "value": "(hidden)"}
+
+        @add("save_session", "After signing in to a job portal, save the portal's signed-in session so the "
+             "user's other devices can reuse it (private sync repo; AI/email sites are never included).", _obj({}))
+        async def save_session():
+            if self.browser.context is None:
+                raise ToolError("The browser is not open yet")
+            try:
+                from core.sync.engine import SyncEngine
+            except ImportError:  # pragma: no cover
+                from backend.core.sync.engine import SyncEngine
+            state = await self.browser.context.storage_state()
+            res = await asyncio.to_thread(SyncEngine().save_session, "default", state)
+            return {"saved": res.get("saved"), "cookies": res.get("cookies", 0)}
 
         # Email
         @add("email_get_otp", "Read a verification / one-time code from the linked mailbox (Gmail or Outlook API). "

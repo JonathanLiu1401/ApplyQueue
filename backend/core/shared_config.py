@@ -131,15 +131,14 @@ _claim_lock = threading.Lock()
 
 def claim_job(url: str) -> bool:
     """Atomically claim a pending job. Returns True if claimed, False if already taken.
-    Uses both FileLock (cross-process) and threading lock (in-process workers)."""
+    Uses both FileLock (cross-process) and threading lock (in-process workers), plus the sync
+    repo's cross-device lock when sync is on (core.jobs_store.claim_job)."""
+    try:
+        from core import jobs_store
+    except ImportError:  # pragma: no cover
+        from backend.core import jobs_store
     with _claim_lock:
-        with FileLock(JOBS_LOCK):
-            jobs = load_json(JOBS_FILE, {})
-            if url in jobs and jobs[url].get("status") == "pending":
-                jobs[url]["status"] = "in_progress"
-                save_json(JOBS_FILE, jobs)
-                return True
-            return False
+        return jobs_store.claim_job(url)
 
 
 def refresh_credentials():

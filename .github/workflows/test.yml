@@ -1,32 +1,84 @@
 name: Integration Tests
 
+# Private-repo Actions minutes are billed per OS (Linux 1x, Windows 2x, macOS 10x), so:
+# - path filters skip this workflow for docs-only changes;
+# - push/PR runs Linux + Windows; macOS runs only on manual dispatch (run_macos=true)
+#   and before a release.
 on:
   push:
     branches: [main]
+    paths:
+      - 'src/**'
+      - 'src-tauri/**'
+      - 'backend/**'
+      - 'cli/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'vite.config.ts'
+      - 'tsconfig*.json'
+      - 'index.html'
+      - '.github/workflows/test.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'src/**'
+      - 'src-tauri/**'
+      - 'backend/**'
+      - 'cli/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'vite.config.ts'
+      - 'tsconfig*.json'
+      - 'index.html'
+      - '.github/workflows/test.yml'
   workflow_dispatch:
+    inputs:
+      run_macos:
+        description: 'Also run macOS (ARM64 + x64; ~10x minutes)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      include: ${{ steps.m.outputs.include }}
+    steps:
+      - id: m
+        run: |
+          base='[{"platform":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu","label":"Linux-x64"},{"platform":"windows-latest","target":"x86_64-pc-windows-msvc","label":"Windows-x64"}'
+          mac=',{"platform":"macos-latest","target":"aarch64-apple-darwin","label":"macOS-ARM64"},{"platform":"macos-13","target":"x86_64-apple-darwin","label":"macOS-x64"}'
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.run_macos }}" = "true" ]; then
+            echo "include=${base}${mac}]" >> "$GITHUB_OUTPUT"
+          else
+            echo "include=${base}]" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
+    needs: matrix
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: macos-latest
-            target: aarch64-apple-darwin
-            label: macOS-ARM64
-          - platform: macos-13
-            target: x86_64-apple-darwin
-            label: macOS-x64
-          - platform: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            label: Linux-x64
-          - platform: windows-latest
-            target: x86_64-pc-windows-msvc
-            label: Windows-x64
+        include: ${{ fromJSON(needs.matrix.outputs.include) }}
 
     runs-on: ${{ matrix.platform }}
+    env:
+      TEST_OPENROUTER_API_KEY: ${{ secrets.TEST_OPENROUTER_API_KEY }}
     name: Test (${{ matrix.label }})
 
     steps:
@@ -50,12 +102,12 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libsoup-3.0-dev libjavascriptcoregtk-4.1-dev
 
       - name: Install Node dependencies
-        run: npm install
+        run: npm ci
 
       - name: Install Python dependencies
         run: |
           pip install uv
-          uv sync
+          uv sync --frozen
 
       # ── Static Analysis ──────────────────────────────────────────────
       - name: TypeScript type check
@@ -81,6 +133,7 @@ jobs:
 
       # ── Integration Tests (Source) ───────────────────────────────────
       - name: Run integration tests (source)
+        if: env.TEST_OPENROUTER_API_KEY != ''
         env:
           TEST_OPENROUTER_API_KEY: ${{ secrets.TEST_OPENROUTER_API_KEY }}
         run: uv run python scripts/integration-test.py
@@ -96,14 +149,14 @@ jobs:
 
       # ── Integration Tests (Built Binary) ─────────────────────────────
       - name: Run integration tests (binary, Unix)
-        if: runner.os != 'Windows'
+        if: runner.os != 'Windows' && env.TEST_OPENROUTER_API_KEY != ''
         env:
           TEST_OPENROUTER_API_KEY: ${{ secrets.TEST_OPENROUTER_API_KEY }}
         run: |
           uv run python scripts/integration-test.py --binary src-tauri/binaries/langhire-backend-${{ matrix.target }}
 
       - name: Run integration tests (binary, Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && env.TEST_OPENROUTER_API_KEY != ''
         env:
           TEST_OPENROUTER_API_KEY: ${{ secrets.TEST_OPENROUTER_API_KEY }}
         run: |

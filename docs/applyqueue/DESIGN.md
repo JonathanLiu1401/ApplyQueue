@@ -1,9 +1,23 @@
 # DESIGN: ApplyQueue, an open-source, cross-platform job-application agent
 
 Status: Phase 1 design, updated 2026-10-24 with the maintainer's decisions (section 16).
-Repo: `github.com/JonathanLiu1401/ApplyQueue` (public). License: **MIT** (`LICENSE`).
+Repo: `github.com/JonathanLiu1401/ApplyQueue` (**private until the publish gate**). License:
+**MIT** (`LICENSE`, LangHire copyright kept, ours added).
 Prior art: the maintainer's private prototype (Python), summarized in section 1.
-Companion docs: `MILESTONES.md` (v1 plan), `NAME_SHORTLIST.md` (naming research).
+Companion docs: `../PLAN.md` (**current plan; supersedes `MILESTONES.md`**), `MILESTONES.md`
+(original v1 plan), `NAME_SHORTLIST.md` (naming research).
+
+> **Stack update (2026-10-24, maintainer decision):** ApplyQueue is now a fork of
+> [LangHire](https://github.com/jaimaann/LangHire) (MIT) and uses its stack instead of the
+> Electron prototype (archived on branch `archive/electron-scaffold`):
+> **Tauri v2** (Rust shell) + **React/Vite/TypeScript** UI + a **Python FastAPI sidecar**
+> (PyInstaller binary) running **browser-use + Playwright**. Product decisions in this document
+> (sync repo, answer-every-question, confirmation tracking, backends, local models) still apply;
+> sections 3, 11, and 12 are rewritten for the Tauri stack below. Where an older paragraph says
+> Electron, read the Tauri equivalent: main process -> Rust core + Python sidecar; renderer ->
+> Tauri webview; `utilityProcess` -> sidecar worker threads/subprocesses; `safeStorage` -> OS
+> keychain via the `keyring` crate; `electron-builder` -> `tauri build` / `tauri-action`;
+> `electron-updater` -> `tauri-plugin-updater`.
 
 ---
 
@@ -133,26 +147,28 @@ Derivation layer: answers like "Need sponsorship now or later" or availability d
 flags answer-bank entries that contradict structured facts (e.g. a company-specific
 sponsorship answer that disagrees with `workAuth`). All examples here are fictional.
 
-## 3. Electron architecture
+## 3. Desktop architecture (Tauri v2 + Python sidecar)
 
 ### 3.1 Processes
-- **Main process (Node, TypeScript):** config store, keychain, scheduler, sync engine,
-  agent-backend adapters, local MCP server, email/portal OAuth, browser launcher,
-  auto-updater. Only the main process touches disk, network secrets, or child processes.
-- **Renderer (React + Vite):** wizard, dashboard, queue, ledger, architecture view,
-  answer-bank editor. `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`,
-  strict CSP; talks to main via a typed `contextBridge` IPC API (`window.api.*`) with
-  zod-validated payloads.
-- **Worker processes (`utilityProcess`):** discovery scrapers (public ATS JSON), ranker,
-  email poller. Crash-isolated, restartable.
-- **Agent browser:** a separate Chrome/Chromium (system Chrome preferred, Playwright
-  Chromium fallback) launched with a persistent `--user-data-dir` under `userData/browser/`
-  and a CDP port bound to 127.0.0.1. Exposed to agents through `chrome-devtools-mcp` or
-  Playwright MCP.
+- **Tauri core (Rust, `src-tauri/`):** window, menus, app data dir, keychain access, spawns and
+  watches the Python sidecar (`binaries/<name>-backend-<target>`), updater. Small surface.
+- **Webview UI (React + Vite + TypeScript, `src/`):** wizard, dashboard, queue, ledger,
+  answer-bank editor, logs. Talks to the sidecar over `http://127.0.0.1:<port>` with a
+  per-launch bearer token (LangHire's `_AuthMiddleware`), plus a few Tauri commands. CSP must be
+  tightened before release (LangHire ships a permissive one).
+- **Python sidecar (FastAPI, `backend/` + `cli/`):** profile, settings, job collection plugins,
+  the apply loop (browser-use `Agent`), memory store, metrics, Q&A, resume tailoring, email.
+  ApplyQueue adds here: the backend adapter layer (subscription CLIs over MCP), the ApplyQueue
+  MCP tool server, Gmail/Outlook confirmation tracking, the sync-repo engine, and local-model
+  runtime detection. Worker threads/subprocesses give crash isolation.
+- **Agent browser:** Playwright Chromium (or system Chrome) with a persistent profile dir under
+  the app data dir; the sidecar drives it directly (browser-use) or exposes it to CLI agents
+  through our MCP server (browser/form/email/queue tools). See `../PLAN.md` section 3.
 
 ### 3.2 Local storage
 - Config: JSON files + schema validation; writes are atomic (temp + rename).
-- Operational DB: SQLite via `better-sqlite3` (local only, never synced) for jobs cache,
+- Operational DB: SQLite via Python `sqlite3` in the sidecar (local only, never synced; LangHire
+  already keeps `memory_store.db` and a `jobs.json` with file locks) for jobs cache,
   queue view, claims, FTS on postings.
 - Synced state: plain JSONL files in the private sync repo (section 6). SQLite is
   rebuilt from JSONL on any machine, so no binary DB in git.
@@ -163,11 +179,11 @@ Decision (maintainer, 2026-10-24): the user's **private sync repo is the default
 for portal credentials and browser sessions** (section 6.1), so every device and agent finds
 them with zero setup. The local store is secondary:
 
-- **Local vault = cache/mirror.** Electron `safeStorage` (Keychain on macOS, DPAPI on
-  Windows, libsecret/kwallet on Linux) encrypts a per-install vault file that mirrors
+- **Local vault = cache/mirror.** the OS keychain via the Rust `keyring` crate / Python
+  `keyring` (Keychain on macOS, Credential Manager/DPAPI on Windows, Secret Service on Linux) encrypts a per-install vault file that mirrors
   `credentials/` from the sync repo for offline use and fast `fill_secret`. On pull, repo
   wins; on a local change (new account created, password changed) the app writes the repo
-  first, then the mirror. If Linux reports the `basic_text` backend, the mirror is skipped
+  first, then the mirror. If Linux has no Secret Service backend, the mirror is skipped
   (the repo copy is still used) rather than writing a second plaintext copy.
 - **Local-only mode (opt-in):** the user can choose "keep credentials on this device only";
   then the vault is the source of truth, nothing goes to `credentials/` or `sessions/`, and
@@ -375,7 +391,7 @@ loop and only call the tools):
   `:9931` and `:8080` `/v1/models` [L15]; plus any user-entered OpenAI-compatible URL.
 - Binaries on PATH and default install locations: `ollama`, `lms`, `llama-server`.
 - Hardware: NVIDIA VRAM via `nvidia-smi`, AMD via `rocm-smi`, Apple silicon unified memory via
-  total RAM, else Electron `app.getGPUInfo("complete")`; CPU-only is allowed but flagged.
+  total RAM, else a sidecar probe (`nvidia-smi`, `rocm-smi`, `system_profiler`, `wmic`/DXGI); CPU-only is allowed but flagged.
 
 **Recommender** (picks the largest vision model that fits; sizes are download sizes of the
 default 4-bit quantizations unless noted; the rule of thumb is model size + 2-4 GB for
@@ -700,49 +716,48 @@ Work, Claude cloud, Claude in Chrome, and Cursor setup prompts in section 4.2):
   user's non-secret prefs) the user sends to their Grok Bot. Secrets are entered by the user
   in the bot's own vault, never embedded in the prompt.
 
-## 11. Repo layout (public OSS repo)
+## 11. Repo layout (fork of LangHire)
 
 ```
-ApplyQueue/            # public: github.com/JonathanLiu1401/ApplyQueue
-  LICENSE                  # MIT
-  apps/desktop/            # Electron main + preload + renderer (React)
-  packages/core/           # queue, ranking, ledger, dedupe, confirm-classify (pure TS, tested)
-  packages/schema/         # JSON Schemas + zod types for config + ledger
-  packages/mcp-server/     # ApplyQueue MCP server (stdio + optional authenticated HTTP)
-  packages/sources/        # Greenhouse, Ashby, Lever, Workday CXS, SmartRecruiters, ... (public data)
-  packages/backends/       # grok-bot, chatgpt, claude, gemini, cursor, local, custom-mcp
-  packages/runner/         # in-app agent runner (OpenAI-compatible + native computer-use adapters)
-  packages/local/          # local runtime detection, hardware probe, model recommender, downloads
-  packages/prompts/        # setup-prompt generator shared by subscription backends
-  packages/email/          # gmail, graph (outlook), imap, re-auth notifier
-  catalog/companies.json   # community-maintained company -> ATS board map (no personal notes)
-  templates/packs/         # starter packs: categories + sample answers, fictional data only
-  docs/                    # architecture, privacy, backend guides
-  .github/workflows/       # ci.yml, release.yml
+ApplyQueue/            # github.com/JonathanLiu1401/ApplyQueue (private until the publish gate)
+  LICENSE                  # MIT: LangHire Contributors + ApplyQueue contributors
+  src/                     # React + Vite + TS UI (from LangHire), i18n in src/locales/
+  src-tauri/               # Tauri v2 shell (Rust), sidecar config, icons
+  backend/                 # FastAPI sidecar: main.py, core/ (LLM factory, config), sources/
+                           #   plugins, memory/, resume/, metrics; ApplyQueue adds:
+    backends/              #   subscription CLI adapters (claude, grok, cursor, codex, ...)
+    mcp/                   #   ApplyQueue MCP tool server (browser/form/email/queue tools)
+    email/                 #   gmail + outlook (Graph) confirmation tracking and labeling
+    sync/                  #   private GitHub sync repo engine (refuses public repos)
+    local/                 #   runtime detection, hardware probe, vision-model recommender
+  cli/                     # apply loop (apply_jobs.py), collectors, tailoring
+  tests/                   # pytest (backend), plus src/**/*.test.ts (vitest)
+  scripts/                 # build-backend, privacy-scan, license checks, integration test
+  docs/                    # PLAN.md, applyqueue/ (design history), examples/packs/
+  .github/workflows/       # ci.yml (privacy + licenses), test.yml, build.yml
 ```
 
-Language choice: port the Python logic to TypeScript (one runtime, easy packaging). Optional
-alternative: ship the Python core as a sidecar (PyInstaller) to reuse code faster; not
-recommended for v1 because of three-OS packaging and signing overhead.
+Language choice (superseded): v1 keeps LangHire's Python sidecar; no TypeScript port.
 
 ## 12. CI, packaging, auto-update
 
-- GitHub Actions matrix (macos-14, windows-latest, ubuntu-22.04): lint, typecheck, unit
-  tests (vitest), Playwright e2e of the wizard against fixture ATS pages, secret scan
-  (gitleaks) and personal-data scan on every PR and push to the **public** app repo. The
-  public repo never contains secrets, credentials, sessions, or personal data; those belong
-  only in each user's private sync repo.
-- `electron-builder` targets: macOS dmg + zip (universal or arm64/x64), Windows NSIS,
-  Linux AppImage + deb (+ rpm optional).
-- macOS: Developer ID signing + notarization (`notarize` via `@electron/notarize`,
-  App Store Connect API key in Actions secrets), hardened runtime.
-- Windows: Authenticode signing (Azure Trusted Signing or an OV/EV cert via
-  `signtoolOptions`/custom sign hook); unsigned builds get SmartScreen warnings.
-- Linux: AppImage (auto-update supported), deb via apt instructions.
-- Auto-update: `electron-updater` with GitHub Releases provider (latest.yml/latest-mac.yml),
-  staged rollout channel (beta/stable).
-- Release flow: tag `v*` -> release workflow builds, signs, notarizes, uploads drafts;
-  maintainer publishes.
+- Private-repo Actions minutes cost per OS (Linux 1x, Windows 2x, macOS 10x). CI therefore:
+  `ci.yml` runs gitleaks + the personal-data scan over full history and the npm + Python license
+  checks on every push/PR (Linux only); `test.yml` (type check, lint, vite build, vitest, pytest,
+  backend binary) runs on Linux + Windows with path filters, and macOS only on manual dispatch
+  or before a release; `build.yml` (tauri-action installers) runs on tags or dispatch.
+- The repo never contains secrets, credentials, sessions, or personal data; those belong only
+  in each user's private sync repo and OS keychain.
+- Packaging: `tauri build` with the PyInstaller sidecar as `externalBin`. macOS dmg/app
+  (arm64 + x64), Windows NSIS/MSI, Linux AppImage + deb (+ rpm optional).
+- macOS: Developer ID signing + notarization through tauri-action env (`APPLE_CERTIFICATE`,
+  `APPLE_ID`/API key) and hardened runtime; the sidecar binary must be signed too.
+- Windows: Authenticode (Azure Trusted Signing or OV/EV cert via `signCommand`); unsigned
+  builds get SmartScreen warnings.
+- Auto-update: `tauri-plugin-updater` with signed update manifests on GitHub Releases
+  (only after the publish gate; until then releases stay in the private repo).
+- Release flow: tag `v*` -> build workflow builds, signs, notarizes, uploads drafts;
+  maintainer publishes after the publish gate.
 
 ## 13. License
 

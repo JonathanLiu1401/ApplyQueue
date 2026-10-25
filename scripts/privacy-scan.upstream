@@ -1,0 +1,7 @@
+# Third-party upstream history merged into ApplyQueue, verbatim from
+# https://github.com/jaimaann/LangHire (public, MIT). One commit SHA per line.
+# Commits reachable from these, and blobs reachable from their trees, are third-party
+# public content: the generic email/phone/path rules skip them (we cannot and must not
+# rewrite upstream history), but the hashed personal-data denylist still scans them.
+# Add the new upstream tip here when syncing from LangHire.
+e43d8faeaabe330a42697f02404580488d12088a

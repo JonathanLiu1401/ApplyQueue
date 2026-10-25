@@ -1,5 +1,9 @@
 # MILESTONES: v1 plan
 
+> **Superseded (2026-10-24) by [`../PLAN.md`](../PLAN.md).** ApplyQueue is now a fork of
+> LangHire (Tauri v2 + Python sidecar); the Electron milestones below (M0-M4 shell work) are
+> historical. The product goals carry over into PLAN.md M1-M8 and the publish gate.
+
 Assumes 1 to 2 developers plus agents; durations are rough. Each milestone ends with a demo
 and a tagged pre-release. Repo: github.com/JonathanLiu1401/ApplyQueue (**private until the
 publish gate below is passed**). Project

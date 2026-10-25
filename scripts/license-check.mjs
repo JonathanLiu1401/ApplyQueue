@@ -1,9 +1,12 @@
 #!/usr/bin/env node
-// Fails if any installed dependency (prod or dev) has a license outside the allowlist.
+// Fails if any npm dependency (prod or dev) in package-lock.json has a license outside the
+// allowlist. Python sidecar deps are checked by scripts/license-check-python.py.
 // ApplyQueue is MIT; we only accept permissive or file-level copyleft licenses.
-import { execFileSync } from "node:child_process";
+// Reads package-lock.json (lockfileVersion 3 records each package's license), so it needs no
+// install and sees exactly what CI and releases will install.
+import { readFileSync } from "node:fs";
 
-const ALLOWED = new Set([
+export const ALLOWED = new Set([
   "MIT", "ISC", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0", "0BSD", "BlueOak-1.0.0",
   "CC0-1.0", "CC-BY-3.0", "CC-BY-4.0", "Python-2.0", "Unlicense", "WTFPL", "MPL-2.0", "Zlib",
   "BSD", "MIT-0",
@@ -17,17 +20,20 @@ function allowed(expr) {
   return ALLOWED.has(e.replace(/[()]/g, "").trim());
 }
 
-const json = execFileSync("pnpm", ["licenses", "list", "--json"], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-const byLicense = JSON.parse(json);
+const lock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
 const bad = [];
-let total = 0;
-for (const [license, pkgs] of Object.entries(byLicense)) {
-  total += pkgs.length;
-  if (!allowed(license)) for (const p of pkgs) bad.push(`${p.name}@${(p.versions ?? [p.version]).join(",")}: ${license}`);
+const seen = new Map();
+for (const [path, meta] of Object.entries(lock.packages ?? {})) {
+  if (!path || meta.link) continue; // root project / workspace links
+  const name = meta.name ?? path.split("node_modules/").pop();
+  const license = meta.license ?? "UNKNOWN";
+  seen.set(license, (seen.get(license) ?? 0) + 1);
+  if (!allowed(license)) bad.push(`${name}@${meta.version}${meta.dev ? " (dev)" : ""}: ${license}`);
 }
+const total = [...seen.values()].reduce((a, b) => a + b, 0);
 if (bad.length) {
-  console.error(`License check FAILED (${bad.length} of ${total} packages):\n  ${bad.join("\n  ")}`);
+  console.error(`npm license check FAILED (${bad.length} of ${total} packages):\n  ${bad.join("\n  ")}`);
   console.error("If a license is acceptable, add it to ALLOWED in scripts/license-check.mjs in a reviewed PR.");
   process.exit(1);
 }
-console.log(`License check passed: ${total} packages, licenses: ${Object.keys(byLicense).sort().join(", ")}`);
+console.log(`npm license check passed: ${total} packages, licenses: ${[...seen.keys()].sort().join(", ")}`);

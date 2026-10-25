@@ -15,7 +15,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "privacy-scan": "node scripts/privacy-scan.mjs",
+    "license-check": "node scripts/license-check.mjs"
   },
   "dependencies": {
     "@sentry/browser": "^10.51.0",

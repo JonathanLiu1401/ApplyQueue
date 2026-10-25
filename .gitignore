@@ -79,3 +79,34 @@ node_modules/.tmp/
 *.msi
 *.deb
 *.rpm
+
+# ── ApplyQueue: secrets and personal data never belong in this repo ─────
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.age
+*.kdbx
+credentials/
+sessions/
+browser-profiles/
+**/profiles/
+**/*password*.txt
+**/Cookies
+**/Cookies-journal
+**/Login Data*
+**/Local State
+**/Web Data
+PERSONAL_DATA_INVENTORY.md
+*INVENTORY*.md
+*.db
+*.sqlite
+*.sqlite3
+profile.json
+knowledge.json
+answers.json
+resume*.pdf
+_scratch/
+.privacy-denylist*

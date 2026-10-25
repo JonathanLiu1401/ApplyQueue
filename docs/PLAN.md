@@ -213,17 +213,19 @@ the default is 1 concurrent job per CLI backend, with backoff on rate-limit erro
 - Sidecar: PyInstaller cannot cross-compile, so the x86_64 sidecar is built natively on
   `macos-15-intel` (`build-backend.sh` refuses a non-native Darwin target and prints `lipo` archs).
   The release workflow builds the Intel bundle on `macos-15-intel` too.
-- CI job **"Intel Mac (test, bundle, launch /health)"** (`test.yml`, every code-path push/PR):
-  wheel check → `uv sync` with an x86_64 assert → pytest → x86_64 sidecar → frozen
-  `--self-test` (PDF libs + arch) → `tauri build --target x86_64-apple-darwin` (.app + .dmg) →
-  `scripts/smoke-macos-app.sh` (every Mach-O is x86_64, the packaged app launches and
-  `127.0.0.1:8743/health` answers) → unsigned .dmg artifact kept 3 days.
-- Required check: the **"Required checks"** aggregator job needs `test` (Linux/Windows) and
-  `intel-mac`, and branch protection on `main` requires that one context (no review requirement,
-  admins not enforced so fast-forward pushes from the owner still work, force-push and deletion
-  disabled). Docs-only pushes skip `test.yml` via path filters, so they are not blocked.
-- Cost: macOS minutes are 10x; the Intel job is the only per-push macOS job (concurrency cancels
-  superseded runs). Apple-silicon macOS stays on manual dispatch (`run_macos=true`) and releases.
+- CI job **"Intel Mac (test, bundle, launch /health)"** (`ci.yml`): wheel check → `uv sync` with
+  an x86_64 assert → pytest → x86_64 sidecar → frozen `--self-test` (PDF libs + arch) →
+  `tauri build --target x86_64-apple-darwin` (.app + .dmg) → `scripts/smoke-macos-app.sh` (every
+  Mach-O is x86_64, the packaged app launches and `127.0.0.1:8743/health` answers).
+- **CI runs only on self-hosted runners** (Art, 2026-10-25: "Don't pay for Actions; set up
+  self-hosted runners instead"; details in `docs/applyqueue/CI_RUNNERS.md`). Linux runs on the
+  box on every code push to `main`. The Intel Mac job targets `[self-hosted, macOS, X64, intel]`
+  and runs on push to `main` once the repo variable `INTEL_MAC_RUNNER` is `true` (set after the
+  runner is online), or on dispatch. Windows and Apple silicon are dispatch opt-ins. No PR,
+  fork, schedule or GitHub-hosted jobs.
+- Required check: the **"Required checks"** job (Linux must pass; every selected job must pass).
+  Branch protection on `main` requires that one context (admins not enforced, so the owner's
+  pushes still work). Docs-only pushes run nothing.
 
 ### 4.3 TEST_REPORT.md plan (M8)
 One section per platform: macOS Apple silicon, **macOS Intel**, Windows x64, Linux x64. Each lists

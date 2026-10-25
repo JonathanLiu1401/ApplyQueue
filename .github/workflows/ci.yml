@@ -1,55 +1,335 @@
-name: CI (privacy + licenses)
+name: CI (self-hosted)
 
-# Cheap, Linux-only gate that runs on every push and PR, whatever changed.
+# ApplyQueue CI runs ONLY on self-hosted runners (no paid GitHub-hosted minutes). Setup:
+# docs/applyqueue/CI_RUNNERS.md.
+#
+#   push to main (code paths)   -> Linux checks on the box runner; + Intel Mac once the repo
+#                                  variable INTEL_MAC_RUNNER is 'true' (a runner is registered)
+#   push to other branches      -> nothing (use workflow_dispatch on the branch)
+#   docs-only pushes            -> nothing (paths-ignore); the full-tree privacy scan runs on
+#                                  the next code push and on every dispatch
+#   pull_request / fork PRs     -> never (no pull_request triggers; jobs also refuse them)
+#   workflow_dispatch           -> Linux checks; opt in to the real app over WebDriver + .deb
+#                                  bundle (Linux), Windows, Intel Mac, Apple silicon:
+#     gh workflow run ci.yml -R JonathanLiu1401/ApplyQueue --ref main -f linux_app=true -f windows=true -f intel_mac=true
+#
+# At most one CI run at a time (repo-wide group, newer run cancels the older one). Every job
+# deletes its build output at the end (if: always()) so the runner's disk does not fill.
 on:
   push:
     branches: [main]
-  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
+      - '.github/CODEOWNERS'
+      - '.github/FUNDING.yml'
   workflow_dispatch:
+    inputs:
+      linux_app:
+        description: 'Linux: compile the real Tauri app, drive it over WebDriver, bundle .deb'
+        type: boolean
+        default: false
+      windows:
+        description: 'Windows (needs a [self-hosted, windows, applyqueue] runner online)'
+        type: boolean
+        default: false
+      intel_mac:
+        description: 'Intel Mac (needs a [self-hosted, macOS, X64, intel] runner online)'
+        type: boolean
+        default: false
+      apple_silicon:
+        description: 'Apple silicon (needs a [self-hosted, macOS, ARM64, applyqueue] runner online)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: applyqueue-ci
   cancel-in-progress: true
 
+env:
+  UV_PYTHON_PREFERENCE: only-managed
+  CI: 'true'
+
 jobs:
-  privacy:
-    name: Secret + personal-data scan (full history)
-    runs-on: ubuntu-latest
+  linux:
+    name: Linux checks (privacy, licenses, unit, e2e, break-it)
+    if: github.event_name != 'pull_request' && github.repository == 'JonathanLiu1401/ApplyQueue'
+    runs-on: [self-hosted, linux, x64, applyqueue]
+    timeout-minutes: 60
     env:
       GITLEAKS_VERSION: 8.30.1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: gitleaks (all commits + working tree)
-        run: |
-          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar xz gitleaks
-          ./gitleaks git --redact --no-banner --exit-code 1 .
-          ./gitleaks dir --redact --no-banner --exit-code 1 --max-target-megabytes 5 .
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
+      - uses: astral-sh/setup-uv@v6
+      - name: gitleaks (all commits + working tree)
+        run: |
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar xz -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" git --redact --no-banner --exit-code 1 .
+          "$RUNNER_TEMP/gitleaks" dir --redact --no-banner --exit-code 1 --max-target-megabytes 5 .
       - name: Personal-data scan (generic rules + hashed denylist)
         # Hash denylist comes from a repo secret; raw values are never stored in this repo.
         env:
           PRIVACY_DENYLIST_SHA256: ${{ secrets.PRIVACY_DENYLIST_SHA256 }}
         run: node scripts/privacy-scan.mjs
-
-  licenses:
-    name: Dependency licenses (npm + Python)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
       - name: npm licenses (from package-lock.json)
         run: node scripts/license-check.mjs
-      - uses: astral-sh/setup-uv@v6
+      - run: npm ci --no-audit --no-fund
+      - run: uv sync --frozen --python 3.13
       - name: Python licenses (sidecar deps)
+        run: uv run python scripts/license-check-python.py
+      - name: Intel Mac wheel coverage (every locked dep has a macOS x86_64 wheel)
+        run: python3 scripts/check-macos-x64-wheels.py uv.lock
+      - name: TypeScript type check
+        run: npx tsc --noEmit --skipLibCheck
+      - name: ESLint
+        run: npx eslint . --max-warnings 0
+        continue-on-error: true
+      - name: Frontend build (Vite)
+        run: npm run build
+      - name: Frontend unit tests (Vitest + coverage)
+        run: npm run test:coverage
+      - name: Playwright Chromium (system libraries are preinstalled on the runner host)
+        run: uv run python -m playwright install chromium
+      - name: Backend + agent e2e + break-it tests (pytest + coverage)
+        run: uv run pytest tests/ --ignore=tests/ui_e2e --ignore=tests/webdriver --cov --cov-report=term-missing -p no:cacheprovider
+      - name: Build backend sidecar
+        run: bash scripts/build-backend.sh x86_64-unknown-linux-gnu
+      - name: Sidecar self-test (frozen binary, bundled tz database)
+        run: |
+          src-tauri/binaries/applyqueue-backend-x86_64-unknown-linux-gnu --self-test | tee "$RUNNER_TEMP/st.json"
+          grep -q '"tzdb": true' "$RUNNER_TEMP/st.json"
+      - name: UI e2e + adversarial (production frontend + packaged sidecar)
+        run: |
+          APPLYQUEUE_SIDECAR="$PWD/src-tauri/binaries/applyqueue-backend-x86_64-unknown-linux-gnu" \
+            uv run pytest tests/ui_e2e -q -rs -p no:cacheprovider
+      - name: Disk hygiene (build output, deps, caches)
+        if: always()
+        run: |
+          rm -rf src-tauri/target src-tauri/binaries/applyqueue-backend-* dist build node_modules .venv coverage htmlcov .coverage
+          uv cache prune --ci || true
+          npm cache clean --force >/dev/null 2>&1 || true
+          df -h . | tail -1
+
+  linux-app:
+    # The real app: Rust/Tauri compile, WebDriver over WebKitWebDriver, .deb bundle. Dispatch only.
+    name: Linux app (Tauri compile, WebDriver, .deb)
+    needs: linux
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.linux_app &&
+      github.repository == 'JonathanLiu1401/ApplyQueue'
+    runs-on: [self-hosted, linux, x64, applyqueue]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - uses: astral-sh/setup-uv@v6
+      - run: npm ci --no-audit --no-fund
+      - run: uv sync --frozen --python 3.13
+      - name: Build backend sidecar
+        run: bash scripts/build-backend.sh x86_64-unknown-linux-gnu
+      - name: Compile + bundle Tauri app (.deb, unsigned)
+        run: npx tauri build --target x86_64-unknown-linux-gnu --bundles deb
+      - name: Real Tauri app over WebDriver (tauri-driver + WebKitWebDriver, preinstalled)
+        run: |
+          command -v tauri-driver >/dev/null || cargo install tauri-driver --locked
+          APPLYQUEUE_TAURI_APP="$PWD/src-tauri/target/x86_64-unknown-linux-gnu/release/app" \
+            xvfb-run -a uv run pytest tests/webdriver -q -x -p no:cacheprovider
+      - name: Disk hygiene
+        if: always()
+        run: |
+          rm -rf src-tauri/target src-tauri/binaries/applyqueue-backend-* dist build node_modules .venv
+          uv cache prune --ci || true
+          df -h . | tail -1
+
+  windows:
+    name: Windows (unit, e2e, sidecar, WebDriver)
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.windows &&
+      github.repository == 'JonathanLiu1401/ApplyQueue'
+    runs-on: [self-hosted, windows, applyqueue]
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - uses: astral-sh/setup-uv@v6
+      - run: npm ci --no-audit --no-fund
+      - run: uv sync --frozen --python 3.13
+      - name: TypeScript type check
+        run: npx tsc --noEmit --skipLibCheck
+      - name: Frontend unit tests (Vitest)
+        run: npm run test:coverage
+      - name: Install Playwright Chromium
+        run: uv run python -m playwright install chromium
+      - name: Backend + agent e2e + break-it tests (pytest)
+        run: uv run pytest tests/ --ignore=tests/ui_e2e --ignore=tests/webdriver -q -p no:cacheprovider
+      - name: Build backend sidecar
+        shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File scripts/build-backend.ps1
+      - name: Sidecar self-test (frozen binary)
+        run: |
+          src-tauri/binaries/applyqueue-backend-x86_64-pc-windows-msvc.exe --self-test | tee "$RUNNER_TEMP/st.json"
+          grep -q '"tzdb": true' "$RUNNER_TEMP/st.json"
+      - name: UI e2e (production frontend + packaged sidecar)
+        run: |
+          APPLYQUEUE_SIDECAR="$PWD/src-tauri/binaries/applyqueue-backend-x86_64-pc-windows-msvc.exe" \
+            uv run pytest tests/ui_e2e -q -rs -p no:cacheprovider
+      - name: Compile Tauri app (no bundle, unsigned)
+        run: npx tauri build --no-bundle --target x86_64-pc-windows-msvc
+      - name: Real Tauri app over WebDriver (tauri-driver + msedgedriver, experimental)
+        continue-on-error: true
+        run: |
+          command -v tauri-driver >/dev/null || cargo install tauri-driver --locked
+          command -v msedgedriver-tool >/dev/null || cargo install --git https://github.com/chippers/msedgedriver-tool
+          (cd "$RUNNER_TEMP" && msedgedriver-tool)
+          export APPLYQUEUE_NATIVE_DRIVER="$RUNNER_TEMP/msedgedriver.exe"
+          export APPLYQUEUE_TAURI_APP="$PWD/src-tauri/target/x86_64-pc-windows-msvc/release/app.exe"
+          uv run pytest tests/webdriver -q -x -rA -s -p no:cacheprovider
+      - name: Disk hygiene
+        if: always()
+        run: |
+          rm -rf src-tauri/target src-tauri/binaries/applyqueue-backend-* dist build node_modules .venv
+          uv cache prune --ci || true
+
+  intel-mac:
+    # Intel Macs (x86_64) are a hard requirement: test natively (never Rosetta), build the
+    # x86_64 PyInstaller sidecar, bundle the .app/.dmg, launch it and check /health.
+    # Runs on push to main only once vars.INTEL_MAC_RUNNER == 'true' (set after the runner is
+    # online), so nothing queues forever while no Intel Mac runner exists.
+    name: Intel Mac (test, bundle, launch /health)
+    if: >-
+      github.repository == 'JonathanLiu1401/ApplyQueue' && github.event_name != 'pull_request' && (
+        (github.event_name == 'push' && vars.INTEL_MAC_RUNNER == 'true') ||
+        (github.event_name == 'workflow_dispatch' && inputs.intel_mac) )
+    runs-on: [self-hosted, macOS, X64, intel, applyqueue]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - uses: astral-sh/setup-uv@v6
+      - name: Python dependencies (native x86_64)
         run: |
           uv sync --frozen --python 3.13
-          uv run python scripts/license-check-python.py
+          ARCH=$(uv run python -c "import platform; print(platform.machine())")
+          echo "Python arch: $ARCH"
+          test "$ARCH" = "x86_64"
+      - run: npm ci --no-audit --no-fund
+      - name: Install Playwright Chromium (mock ATS + agent e2e)
+        run: uv run python -m playwright install chromium
+      - name: Backend + agent e2e + break-it tests (pytest, x86_64)
+        run: uv run pytest tests/ --ignore=tests/ui_e2e --ignore=tests/webdriver -q -p no:cacheprovider
+      - name: Build backend sidecar (x86_64)
+        run: bash scripts/build-backend.sh x86_64-apple-darwin
+      - name: Sidecar self-test (frozen binary)
+        run: |
+          src-tauri/binaries/applyqueue-backend-x86_64-apple-darwin --self-test | tee "$RUNNER_TEMP/st.json"
+          grep -q '"machine": "x86_64"' "$RUNNER_TEMP/st.json"
+          grep -q '"tzdb": true' "$RUNNER_TEMP/st.json"
+      - name: Bundle Tauri app (x86_64, unsigned)
+        run: npx tauri build --target x86_64-apple-darwin --bundles app,dmg
+      - name: UI e2e (production frontend + packaged x86_64 sidecar)
+        run: |
+          APPLYQUEUE_SIDECAR="$PWD/src-tauri/binaries/applyqueue-backend-x86_64-apple-darwin" \
+            uv run pytest tests/ui_e2e -q -rs -p no:cacheprovider
+      - name: Launch packaged app and check /health
+        run: |
+          APP=$(ls -d src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app | head -1)
+          bash scripts/smoke-macos-app.sh "$APP" x86_64
+          ls -la src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+      - name: Disk hygiene
+        if: always()
+        run: |
+          rm -rf src-tauri/target src-tauri/binaries/applyqueue-backend-* dist build node_modules .venv
+          uv cache prune --ci || true
+          df -h . | tail -1
+
+  apple-silicon:
+    name: Apple silicon (test, bundle, launch /health)
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.apple_silicon &&
+      github.repository == 'JonathanLiu1401/ApplyQueue'
+    runs-on: [self-hosted, macOS, ARM64, applyqueue]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen --python 3.13
+      - run: npm ci --no-audit --no-fund
+      - name: Install Playwright Chromium
+        run: uv run python -m playwright install chromium
+      - name: Backend + agent e2e + break-it tests (pytest, arm64)
+        run: uv run pytest tests/ --ignore=tests/ui_e2e --ignore=tests/webdriver -q -p no:cacheprovider
+      - name: Build backend sidecar (arm64)
+        run: bash scripts/build-backend.sh aarch64-apple-darwin
+      - name: Sidecar self-test (frozen binary)
+        run: |
+          src-tauri/binaries/applyqueue-backend-aarch64-apple-darwin --self-test | tee "$RUNNER_TEMP/st.json"
+          grep -q '"tzdb": true' "$RUNNER_TEMP/st.json"
+      - name: Bundle Tauri app (arm64, unsigned)
+        run: npx tauri build --target aarch64-apple-darwin --bundles app,dmg
+      - name: UI e2e (production frontend + packaged sidecar)
+        run: |
+          APPLYQUEUE_SIDECAR="$PWD/src-tauri/binaries/applyqueue-backend-aarch64-apple-darwin" \
+            uv run pytest tests/ui_e2e -q -rs -p no:cacheprovider
+      - name: Launch packaged app and check /health
+        run: |
+          APP=$(ls -d src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app | head -1)
+          bash scripts/smoke-macos-app.sh "$APP" arm64
+      - name: Disk hygiene
+        if: always()
+        run: |
+          rm -rf src-tauri/target src-tauri/binaries/applyqueue-backend-* dist build node_modules .venv
+          uv cache prune --ci || true
+
+  required:
+    # Single status check for branch protection on main ("Required checks"): every job that ran
+    # must pass; jobs that were not selected (skipped) are fine.
+    name: Required checks
+    needs: [linux, linux-app, windows, intel-mac, apple-silicon]
+    if: always() && github.event_name != 'pull_request' && github.repository == 'JonathanLiu1401/ApplyQueue'
+    runs-on: [self-hosted, linux, x64, applyqueue]
+    steps:
+      - name: All selected jobs passed
+        env:
+          LINUX: ${{ needs.linux.result }}
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "linux=$LINUX all=$RESULTS"
+          [ "$LINUX" = success ] || { echo "::error::Linux checks: $LINUX"; exit 1; }
+          for r in $RESULTS; do
+            case "$r" in success|skipped) ;; *) echo "::error::a selected job ended as $r"; exit 1 ;; esac
+          done

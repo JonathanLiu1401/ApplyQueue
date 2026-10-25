@@ -1,40 +1,74 @@
 name: Build & Release
 
+# Draft-release builds on SELF-HOSTED runners only (no paid minutes). Manual dispatch only:
+#   gh workflow run build.yml -R JonathanLiu1401/ApplyQueue --ref main -f windows=true -f intel_mac=true
+# Each platform is opt-in so nothing queues for a runner that does not exist. Linux ARM64 has no
+# runner yet and is not built. Never runs for pull requests or forks.
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
+    inputs:
+      linux:
+        description: 'Linux x64 (box runner)'
+        type: boolean
+        default: true
+      windows:
+        description: 'Windows x64 (needs a [self-hosted, windows, applyqueue] runner)'
+        type: boolean
+        default: false
+      intel_mac:
+        description: 'macOS x64 / Intel (needs a [self-hosted, macOS, X64, intel] runner)'
+        type: boolean
+        default: false
+      apple_silicon:
+        description: 'macOS arm64 (needs a [self-hosted, macOS, ARM64, applyqueue] runner)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
+concurrency:
+  group: applyqueue-release
+  cancel-in-progress: false
+
 jobs:
+  plan:
+    # Builds the matrix from the opt-in inputs so no job queues for a runner that does not exist.
+    if: github.event_name != 'pull_request' && github.repository == 'JonathanLiu1401/ApplyQueue'
+    runs-on: [self-hosted, linux, x64, applyqueue]
+    outputs:
+      include: ${{ steps.m.outputs.include }}
+    steps:
+      - id: m
+        env:
+          LINUX: ${{ inputs.linux }}
+          WINDOWS: ${{ inputs.windows }}
+          INTEL_MAC: ${{ inputs.intel_mac }}
+          APPLE_SILICON: ${{ inputs.apple_silicon }}
+        run: |
+          inc=""
+          add() { inc="${inc:+$inc,}$1"; }
+          # Intel Macs are a hard requirement. PyInstaller cannot cross-compile, so the x86_64
+          # sidecar must be built on a native Intel runner.
+          [ "$INTEL_MAC" = true ] && add '{"runner":["self-hosted","macOS","X64","intel","applyqueue"],"target":"x86_64-apple-darwin","label":"macOS-x64"}'
+          [ "$APPLE_SILICON" = true ] && add '{"runner":["self-hosted","macOS","ARM64","applyqueue"],"target":"aarch64-apple-darwin","label":"macOS-ARM64"}'
+          [ "$LINUX" = true ] && add '{"runner":["self-hosted","linux","x64","applyqueue"],"target":"x86_64-unknown-linux-gnu","label":"Linux-x64"}'
+          [ "$WINDOWS" = true ] && add '{"runner":["self-hosted","windows","applyqueue"],"target":"x86_64-pc-windows-msvc","label":"Windows-x64"}'
+          [ -n "$inc" ] || { echo "::error::select at least one platform"; exit 1; }
+          echo "include=[$inc]" >> "$GITHUB_OUTPUT"
+
   build-tauri:
+    needs: plan
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: macos-latest
-            target: aarch64-apple-darwin
-            label: macOS-ARM64
-          # Intel Macs are a hard requirement. PyInstaller cannot cross-compile,
-          # so the x86_64 sidecar must be built on a native Intel runner.
-          - platform: macos-15-intel
-            target: x86_64-apple-darwin
-            label: macOS-x64
-          - platform: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            label: Linux-x64
-          - platform: ubuntu-22.04-arm
-            target: aarch64-unknown-linux-gnu
-            label: Linux-ARM64
-          - platform: windows-latest
-            target: x86_64-pc-windows-msvc
-            label: Windows-x64
+        include: ${{ fromJSON(needs.plan.outputs.include) }}
 
-    runs-on: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
     name: Build (${{ matrix.label }})
+    timeout-minutes: 120
+    env:
+      UV_PYTHON_PREFERENCE: only-managed
 
     steps:
       - name: Checkout
@@ -50,27 +84,15 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.13'
+      - uses: astral-sh/setup-uv@v6
 
-      - name: Install Linux dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libsoup-3.0-dev libjavascriptcoregtk-4.1-dev xdg-utils
-
+      # Linux system libraries (webkit2gtk etc.) are preinstalled on the runner host: jobs never sudo.
       - name: Install Node dependencies
-        run: npm install
+        run: npm ci --no-audit --no-fund
 
       - name: Install Python dependencies
         # uv-managed CPython ships libpython as a shared lib, which PyInstaller needs.
-        env:
-          UV_PYTHON_PREFERENCE: only-managed
-        run: |
-          pip install uv
-          uv sync --frozen --python 3.13
+        run: uv sync --frozen --python 3.13
 
       - name: Build Python backend (PyInstaller)
         run: bash scripts/build-backend.sh ${{ matrix.target }}
@@ -85,23 +107,29 @@ jobs:
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        # Self-hosted Mac = someone's real Mac: use a throwaway keychain, ADD it to the user's
+        # search list (never replace the list), and delete it in "Disk hygiene" (if: always()).
         run: |
-          CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          echo -n "$APPLE_CERTIFICATE" | base64 --decode -o $CERTIFICATE_PATH
-          security create-keychain -p "" $KEYCHAIN_PATH
-          security set-keychain-settings $KEYCHAIN_PATH
-          security unlock-keychain -p "" $KEYCHAIN_PATH
-          security import $CERTIFICATE_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
-          security set-key-partition-list -S apple-tool:,apple: -k "" $KEYCHAIN_PATH
-          security list-keychain -d user -s $KEYCHAIN_PATH
+          if [ -z "$APPLE_CERTIFICATE" ]; then echo "no signing certificate configured; building unsigned"; exit 0; fi
+          CERTIFICATE_PATH="$RUNNER_TEMP/certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          echo -n "$APPLE_CERTIFICATE" | base64 --decode -o "$CERTIFICATE_PATH"
+          security create-keychain -p "" "$KEYCHAIN_PATH"
+          security set-keychain-settings "$KEYCHAIN_PATH"
+          security unlock-keychain -p "" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          rm -f "$CERTIFICATE_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "" "$KEYCHAIN_PATH"
+          EXISTING=$(security list-keychains -d user | tr -d '"' | xargs)
+          # shellcheck disable=SC2086  # EXISTING is a space-separated list of keychain paths
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $EXISTING
 
       - name: Sign sidecar binary with entitlements (macOS)
         if: runner.os == 'macOS'
         run: |
           BINARY="src-tauri/binaries/applyqueue-backend-${{ matrix.target }}"
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          IDENTITY=$(security find-identity -v -p codesigning $KEYCHAIN_PATH | grep -E "Developer ID|Apple Development" | head -1 | awk -F'"' '{print $2}')
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" 2>/dev/null | grep -E "Developer ID|Apple Development" | head -1 | awk -F'"' '{print $2}')
           if [ -n "$IDENTITY" ] && [ -f "$BINARY" ]; then
             codesign --force --options runtime --entitlements src-tauri/Entitlements.plist --sign "$IDENTITY" "$BINARY"
             echo "✅ Signed sidecar with: $IDENTITY"
@@ -134,8 +162,7 @@ jobs:
             | macOS (Intel) | `.dmg` |
             | Windows | `.exe` installer |
             | Linux x64 | `.AppImage` or `.deb` |
-            | Linux ARM64 | `.deb` |
-
+            
             ### What's New
             See the [release notes](https://github.com/${{ github.repository }}/releases) for details.
 
@@ -147,19 +174,12 @@ jobs:
           prerelease: false
           args: --target ${{ matrix.target }}
 
-  # Notify on completion
-  notify:
-    needs: build-tauri
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - name: Build Summary
+      - name: Disk hygiene
+        if: always()
+        shell: bash
         run: |
-          echo "## Build Results" >> $GITHUB_STEP_SUMMARY
-          echo "| Platform | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| macOS ARM64 | ${{ needs.build-tauri.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| macOS x64 | ${{ needs.build-tauri.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Linux x64 | ${{ needs.build-tauri.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Linux ARM64 | ${{ needs.build-tauri.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Windows x64 | ${{ needs.build-tauri.result }} |" >> $GITHUB_STEP_SUMMARY
+          rm -rf src-tauri/target src-tauri/binaries/applyqueue-backend-* dist build node_modules .venv
+          uv cache prune --ci || true
+          if [ "$RUNNER_OS" = "macOS" ] && [ -f "$RUNNER_TEMP/app-signing.keychain-db" ]; then
+            security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" || true
+          fi

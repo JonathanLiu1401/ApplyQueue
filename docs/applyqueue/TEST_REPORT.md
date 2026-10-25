@@ -2,48 +2,45 @@
 
 Status: **M8 break-it pass done on Linux; CI-blocked rows below are pending**. Last update: 2026-10-25 12:30 PDT (HEAD ff49fe2 + this report).
 
-> **No more pushes or workflow runs:** CI runs used up the account's Actions minutes, so from this
-> commit on, work is committed locally only and nothing is pushed or dispatched until Art says so.
+> **CI moved to self-hosted runners (Art, 2026-10-25: "Don't pay for Actions; set up self-hosted
+> runners instead").** GitHub-hosted runs used up the account's Actions minutes (and earlier were
+> refused for billing since dd77c14, runs [40196034194](https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/40196034194),
+> [40196670196](https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/40196670196)). All
+> GitHub-hosted jobs are removed; see [CI_RUNNERS.md](CI_RUNNERS.md). Results below marked "CI"
+> before dd77c14 came from GitHub-hosted runners; everything since is local Linux until the
+> self-hosted runners have run.
 
-> **CI blocked (needs Art):** since dd77c14 every GitHub Actions job is refused before it starts:
-> "The job was not started because recent account payments have failed or your spending limit
-> needs to be increased" (runs [40196034194](https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/40196034194),
-> [40196670196](https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/40196670196)). This is
-> not a test failure. dd77c14 and 6524648 were verified **locally on Linux only** (below). Windows,
-> both Macs and the Apple-silicon dispatch need Actions billing fixed and then a re-run.
 All fixtures use the fictional "Alex Example" persona (example.com, 555-01xx). No real accounts
 or tokens are used anywhere in CI; mail, GitHub and ATS endpoints are local mocks.
 
 CI runs: `https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/<id>`
 
-## 0. CI plan and the staged full-suite command
-
-CI was trimmed while Actions billing is blocked (c0629eb), to cut macOS minutes:
+## 0. CI plan (self-hosted runners only)
 
 | Trigger | What runs |
 |---|---|
-| Any push / PR touching code | **Linux checks** only: tsc, eslint, vite build, vitest, full pytest (agent e2e on mock ATS, break-it suite), packaged Linux sidecar + UI e2e. npm, uv and Playwright caches |
-| Push to `main` (code paths) | Linux checks + **Windows** + **Intel Mac** (native `macos-15-intel`: tests, x86_64 sidecar self-test, `.app`/`.dmg`, UI e2e, launch + `/health`). Build Check (real app over WebDriver, Linux + Windows) runs on its own build paths |
-| Nightly 03:23 PDT | full 4-platform suite + Build Check incl. macOS arm64, **only if `main` moved** since the last successful nightly |
-| `workflow_dispatch` | full 4-platform suite + Build Check by default |
-| Tags `v*` (build.yml) | release builds incl. native Intel Mac (unchanged) |
+| Push to `main` (code paths) | `ci.yml` **Linux checks** on the box runner `applyqueue-box-linux`: gitleaks, personal-data scan, licenses, tsc, eslint, vite build, vitest, full pytest (agent e2e on mock ATS, break-it suite), packaged Linux sidecar + self-test + UI e2e. Plus **Intel Mac** once the repo variable `INTEL_MAC_RUNNER` is `true` |
+| Docs-only pushes, other branches, PRs, forks, schedules | nothing |
+| `workflow_dispatch` (`ci.yml`) | Linux checks + opt-in `linux_app` (real Tauri app over WebDriver, .deb), `windows`, `intel_mac`, `apple_silicon` |
+| `workflow_dispatch` (`build.yml`) | draft release builds for the ticked platforms |
 
-Superseded branch/PR runs are cancelled. Runs on `main` are never cancelled, and push, nightly and
-dispatch runs no longer cancel each other. **Required checks** requires Linux + Windows +
-Intel Mac (+ Apple silicon when selected, + Build Check when it ran) on every push-to-main /
-nightly / dispatch run, and Linux checks on branch/PR runs.
+One run at a time (newer cancels older). **Required checks** needs Linux checks to pass and every
+selected job to pass. Every job deletes its build output at the end.
 
-**Once billing is fixed, one command runs everything (Linux, Windows, Intel Mac, Apple silicon,
-plus Build Check: real Tauri app over WebDriver on Linux + Windows and the macOS arm64 build):**
+| Runner | Status (2026-10-25 12:30 PDT) |
+|---|---|
+| Linux `applyqueue-box-linux` | **online** (registered, supervised loop as unprivileged `aqrunner`) |
+| Windows (Legion8724) | **waiting**: the laptop is offline; one-command setup `scripts/runners/setup-windows-runner.ps1` is ready |
+| Intel Mac | **waiting** for Art to run the one-liner from CI_RUNNERS.md (`scripts/runners/setup-macos-runner.sh`) |
+| Apple silicon | **blocked**: no Apple silicon Mac available (same script with `--allow-arm64`) |
+
+Full run once runners are online:
 
 ```bash
-gh workflow run test.yml -R JonathanLiu1401/ApplyQueue --ref main
-# watch it:
-gh run list -R JonathanLiu1401/ApplyQueue -w test.yml -L 1 --json databaseId --jq '.[0].databaseId' \
+gh workflow run ci.yml -R JonathanLiu1401/ApplyQueue --ref main -f linux_app=true -f windows=true -f intel_mac=true
+gh run list -R JonathanLiu1401/ApplyQueue -w ci.yml -L 1 --json databaseId --jq '.[0].databaseId' \
   | xargs -I{} gh run watch {} -R JonathanLiu1401/ApplyQueue --exit-status
 ```
-
-Options: `-f apple_silicon=false` skips the arm64 Mac, and `-f full=false` runs Linux checks only.
 
 ## 1. Per-OS results
 
@@ -190,8 +187,8 @@ and (b) the launch/health smoke of the real `.app` bundle.
 
 ## 7. Not tested yet (honest)
 
-- **Any CI since dd77c14** (Actions billing, then Actions minutes used up; all M8 commits 5be273c…ff49fe2 are verified on local Linux only). Windows, Intel Mac and Apple silicon need a re-run once billing is fixed.
-- Apple-silicon arm64 run in M8 (included in `gh workflow run test.yml -R JonathanLiu1401/ApplyQueue --ref main`, blocked by billing).
-- Real Tauri app over WebDriver on Windows: job written in dd77c14 (`msedgedriver-tool` fetches the msedgedriver matching WebView2; tauri-driver `--native-driver`; `continue-on-error` until proven), never run (billing).
+- **Any CI since dd77c14** (billing, then Actions minutes used up; all M8 commits 5be273c…ff49fe2 are verified on local Linux only). CI now runs on self-hosted runners (§0): Linux runner online; **Windows waits for Legion8724 to come online and run `setup-windows-runner.ps1`**; **Intel Mac waits for Art to run the macOS one-liner**.
+- Apple-silicon arm64 run in M8: **blocked until an Apple silicon Mac is available** as a runner.
+- Real Tauri app over WebDriver on Windows: job written in dd77c14, now in `ci.yml` (`windows` input; `msedgedriver-tool` + tauri-driver, `continue-on-error` until proven), never run.
 - Sync against a real github.com repo: needs Art's OK to create a throwaway private repo on his account (proposed: `applyqueue-sync-e2e-20261025`, created `--private`, visibility re-checked as PRIVATE before any write, deleted afterwards only if `gh` has the `delete_repo` scope, otherwise left private and listed here). Not done.
 - Real Gmail/Outlook/GitHub accounts (by design: mocks only).

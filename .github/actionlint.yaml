@@ -1,0 +1,10 @@
+# actionlint config: custom labels of ApplyQueue's self-hosted runners (docs/applyqueue/CI_RUNNERS.md).
+self-hosted-runner:
+  labels:
+    - applyqueue
+    - intel
+    - apple-silicon
+paths:
+  .github/workflows/**/*.{yml,yaml}:
+    ignore:
+      - 'SC2012'

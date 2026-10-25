@@ -31,6 +31,7 @@ def _get_logger() -> logging.Logger:
             get_data_dir() / "agent_verbose.log",
             maxBytes=10 * 1024 * 1024,
             backupCount=5,
+            encoding="utf-8",  # Windows defaults to cp1252 and drops lines with '──'
         )
         handler.setFormatter(logging.Formatter(
             "%(asctime)s [%(levelname)s] %(message)s",

@@ -85,6 +85,7 @@ logging.basicConfig(
             get_data_dir() / "backend.log",
             maxBytes=5 * 1024 * 1024,
             backupCount=3,
+            encoding="utf-8",
         ),
         logging.StreamHandler(),
     ],

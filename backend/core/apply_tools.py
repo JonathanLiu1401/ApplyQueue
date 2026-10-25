@@ -93,14 +93,9 @@ PARTIAL_HTML_JS = "document.documentElement ? document.documentElement.outerHTML
 
 async def _make_stopped_page_render(cdp) -> None:
     """A page cut off mid-stream (often before its <body>) can stay unpainted after
-    Page.stopLoading, so every browser_use screenshot would still wait 15 s for a frame. If a quick
-    screenshot fails, re-set the document to what already arrived plus a note, which paints."""
-    try:
-        await asyncio.wait_for(cdp.cdp_client.send.Page.captureScreenshot(
-            params={"format": "jpeg", "quality": 10}, session_id=cdp.session_id), timeout=3)
-        return
-    except Exception:
-        pass
+    Page.stopLoading, so every browser_use screenshot would still wait 15 s for a frame. So
+    re-set the document to what already arrived plus a note, which paints. (No probe screenshot
+    first: a second captureScreenshot racing browser_use's own one can hang both.)"""
     r = await asyncio.wait_for(cdp.cdp_client.send.Runtime.evaluate(
         params={"expression": PARTIAL_HTML_JS, "returnByValue": True}, session_id=cdp.session_id), timeout=5)
     partial = (r.get("result") or {}).get("value") or ""

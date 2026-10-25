@@ -21,6 +21,7 @@ src-tauri/gen/
 candidate_profile.json
 qa_repository.json
 jobs.json
+!src/locales/*/jobs.json
 applied_jobs.json
 memory_store.db
 memory_store.db-wal

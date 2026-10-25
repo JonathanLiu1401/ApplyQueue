@@ -205,7 +205,9 @@ M1 checklist (updated with each M1 commit):
 - [ ] Rename to ApplyQueue (identifier, data-dir migration, sidecar name).
 - [x] CI app builds (`build-check.yml`): Linux + Windows on path-filtered push/PR, macOS ARM64 on
   manual dispatch. First CI run pending (not yet verified green).
-- [ ] Telemetry off by default; CSP; i18n files; PyMuPDF replacement.
+- [x] i18n: `src/locales/*/jobs.json` un-ignored; it/zh `jobs.json` added (vitest parity passes).
+- [x] `uv.lock` committed (CI `--frozen`); Dependabot monthly + grouped (it came with upstream).
+- [ ] Telemetry off by default; CSP; PyMuPDF replacement.
 
 ## 6. Guardrails (unchanged)
 Private repo only; no GitHub fork; no upstream PRs, publishing, domains, or npm names without

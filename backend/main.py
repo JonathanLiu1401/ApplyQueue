@@ -670,6 +670,217 @@ async def local_models_use(body: dict):
     return {"success": True, "provider": llm["provider"]}
 
 
+# ── Saved searches, tracker, resumes, starter packs, outreach (M7) ────────
+def _search_err(e: Exception):
+    raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/searches")
+async def list_saved_searches():
+    from core.searches import store as search_store, stats as search_stats, packs
+    from core.shared_config import read_jobs
+    cfg = search_store.load()
+    tr = search_stats.tracker(read_jobs(), cfg)
+    by_id = {s["id"]: s for s in tr["searches"]}
+    return {
+        "searches": [{**s, "stats": by_id.get(s["id"], {})} for s in cfg["searches"]],
+        "rules": cfg["rules"],
+        "resumes": cfg["resumes"],
+        "outreach": cfg["outreach"],
+        "starter_packs": packs.public(),
+    }
+
+
+@app.post("/searches")
+async def save_saved_search(body: dict):
+    from core.searches import store as search_store
+    try:
+        return {"success": True, "search": search_store.upsert_search(body)}
+    except (search_store.ValidationError, TypeError, ValueError) as e:
+        _search_err(e)
+
+
+@app.delete("/searches/{search_id}")
+async def delete_saved_search(search_id: str):
+    from core.searches import store as search_store
+    if not search_store.delete_search(search_id):
+        raise HTTPException(status_code=404, detail="Unknown search")
+    return {"success": True}
+
+
+@app.post("/searches/{search_id}/run")
+async def run_saved_search(search_id: str):
+    from core.searches import store as search_store
+    if not search_store.get_search(search_id):
+        raise HTTPException(status_code=404, detail="Unknown search")
+    return await start_collection(CollectRequest(search_id=search_id))
+
+
+@app.post("/searches/quickstart")
+async def quickstart_search(body: dict):
+    """3-step quick start: CV, titles + locations, Start."""
+    from core.searches import store as search_store
+    try:
+        resume = None
+        if (body.get("resume_path") or "").strip():
+            resume = search_store.add_resume({"path": body["resume_path"], "name": "My resume"})
+            settings = load_settings()
+            if not (settings.get("resume_path") or "").strip():
+                settings["resume_path"] = resume["path"]
+                save_settings(settings)
+        s = search_store.upsert_search({
+            "name": body.get("name") or None,
+            "titles": body.get("titles"), "locations": body.get("locations"),
+            "mode": body.get("mode") or "review", "resume_id": resume["id"] if resume else None,
+        })
+    except (search_store.ValidationError, TypeError, ValueError) as e:
+        _search_err(e)
+    profile = load_profile()
+    if not profile.get("target_job_titles"):
+        profile["target_job_titles"] = s["titles"]
+    if not profile.get("target_locations"):
+        profile["target_locations"] = s["locations"]
+    save_profile(profile)
+    started = None
+    if body.get("start"):
+        started = await start_collection(CollectRequest(search_id=s["id"]))
+    return {"success": True, "search": s, "resume": resume, "started": started}
+
+
+@app.put("/searches/rules")
+async def save_search_rules(body: dict):
+    from core.searches import store as search_store
+    try:
+        return {"success": True, "rules": search_store.set_rules(body)}
+    except (search_store.ValidationError, TypeError, ValueError, AttributeError) as e:
+        _search_err(e)
+
+
+@app.get("/tracker")
+async def get_tracker():
+    from core.searches import store as search_store, stats as search_stats
+    from core.shared_config import read_jobs
+    return search_stats.tracker(read_jobs(), search_store.load())
+
+
+@app.post("/jobs/review")
+async def review_jobs(body: dict):
+    """Review-first mode: approve jobs for applying, or skip them."""
+    from core import jobs_store
+    urls = [u for u in (body.get("urls") or []) if isinstance(u, str)][:500]
+    approve = bool(body.get("approve", True))
+    n = 0
+    for url in urls:
+        job = jobs_store.get_job(url)
+        if not job or job.get("review") != "pending":
+            continue
+        if approve:
+            n += jobs_store.update_job(url, review="approved")
+        else:
+            n += jobs_store.update_job(url, review="skipped", status=js.BLOCKED, skip_reason="Skipped in review")
+    return {"success": True, "updated": n}
+
+
+@app.post("/resumes")
+async def save_resume(body: dict):
+    from core.searches import store as search_store
+    try:
+        return {"success": True, "resume": search_store.add_resume(body)}
+    except (search_store.ValidationError, TypeError, ValueError) as e:
+        _search_err(e)
+
+
+@app.delete("/resumes/{resume_id}")
+async def remove_resume(resume_id: str):
+    from core.searches import store as search_store
+    if not search_store.delete_resume(resume_id):
+        raise HTTPException(status_code=404, detail="Unknown resume")
+    return {"success": True}
+
+
+def _resume_text(path: str) -> str:
+    p = Path(path)
+    if p.suffix.lower() == ".pdf":
+        from core.pdf_io import extract_text
+        return extract_text(p)
+    if p.suffix.lower() == ".docx":
+        import zipfile
+        import re as _re
+        with zipfile.ZipFile(p) as z:
+            xml = z.read("word/document.xml").decode("utf-8", "ignore")
+        return _re.sub(r"<[^>]+>", " ", xml.replace("</w:p>", "\n"))
+    return p.read_text(encoding="utf-8", errors="ignore")
+
+
+@app.post("/resumes/ats-check")
+async def ats_check(body: dict):
+    """Keyword coverage of a resume against a job description (no AI, runs locally)."""
+    from core.searches import store as search_store, ats
+    from core import jobs_store
+    cfg = search_store.load()
+    resume = next((r for r in cfg["resumes"] if r["id"] == body.get("resume_id")), None)
+    if not resume:
+        raise HTTPException(status_code=400, detail="Pick a resume")
+    desc = str(body.get("description") or "")[:50000]
+    if not desc and body.get("job_url"):
+        desc = (jobs_store.get_job(str(body["job_url"])) or {}).get("description") or ""
+    try:
+        text = _resume_text(resume["path"])
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read the resume: {e}")
+    return {"success": True, "resume_id": resume["id"], **ats.check(text, desc)}
+
+
+@app.get("/starter-packs")
+async def list_starter_packs():
+    from core.searches import packs
+    return packs.public()
+
+
+@app.post("/starter-packs/{pack_id}/apply")
+async def apply_starter_pack(pack_id: str):
+    from core.searches import packs, store as search_store
+    try:
+        return {"success": True, **packs.apply(pack_id)}
+    except search_store.ValidationError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.put("/outreach")
+async def save_outreach(body: dict):
+    from core.searches import store as search_store
+    return {"success": True, "outreach": search_store.set_outreach(body or {})}
+
+
+@app.get("/outreach/drafts")
+async def list_outreach_drafts():
+    from core.searches import store as search_store
+    return search_store.list_drafts()
+
+
+@app.post("/outreach/draft")
+async def create_outreach_draft(body: dict):
+    """Drafts only: ApplyQueue never sends recruiter messages."""
+    from core.searches import outreach, store as search_store
+    from core import jobs_store
+    url = str(body.get("job_url") or "")
+    job = jobs_store.get_job(url)
+    if not job:
+        raise HTTPException(status_code=404, detail="Unknown job")
+    try:
+        return {"success": True, "draft": outreach.draft({**job, "url": url}, load_profile())}
+    except search_store.ValidationError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+
+@app.delete("/outreach/drafts/{draft_id}")
+async def delete_outreach_draft(draft_id: str):
+    from core.searches import outreach
+    if not outreach.delete(draft_id):
+        raise HTTPException(status_code=404, detail="Unknown draft")
+    return {"success": True}
+
+
 # ── App Settings ──────────────────────────────────────────────────────────
 @app.get("/settings")
 async def get_settings():
@@ -899,7 +1110,19 @@ async def start_collection(body: CollectRequest):
     title = body.title
     max_jobs = body.max_jobs
     filters = body.filters or {}
-    _collection_status = {"running": True, "title": title or "all titles", "log": ["Starting collection... This may take several minutes per job title."], "collected": 0, "max_jobs": max_jobs}
+    search = None
+    if body.search_id:
+        from core.searches import store as search_store
+        search = search_store.get_search(body.search_id)
+        if not search:
+            return {"success": False, "message": "Unknown saved search"}
+        title = None
+        max_jobs = max_jobs or search.get("max_jobs") or 0
+        filters = {**search.get("filters", {}), **filters}
+        if search.get("locations") and "location" not in filters:
+            filters["location"] = " OR ".join(search["locations"])
+        search_store.touch_search(search["id"])
+    _collection_status = {"running": True, "title": (search or {}).get("name") or title or "all titles", "log": ["Starting collection... This may take several minutes per job title."], "collected": 0, "max_jobs": max_jobs}
 
     async def _do_collect():
         """Run collection logic directly, bypassing argparse."""
@@ -919,7 +1142,7 @@ async def start_collection(body: CollectRequest):
         jobs = read_jobs()
         LOGS_DIR.mkdir(exist_ok=True)
 
-        titles = [title] if title else profile.get("target_job_titles", [])
+        titles = search["titles"] if search else ([title] if title else profile.get("target_job_titles", []))
         cred_task = asyncio.create_task(credential_refresh_loop(CREDENTIAL_REFRESH_MINUTES))
 
         for i, t in enumerate(titles):
@@ -930,8 +1153,11 @@ async def start_collection(body: CollectRequest):
             print(f"[{i+1}/{len(titles)}] Collecting: {t}")
             print(f"{'='*60}")
             try:
+                before = set(jobs)
                 found = await collect_jobs.collect_for_title(t, jobs, profile, max_jobs=max_jobs, filters=filters)
                 jobs = read_jobs()
+                if search:
+                    _tag_new_jobs(search, [u for u in jobs if u not in before])
                 # Don't increment collected here — it's already updated by the stdout/log handler
                 # parsing "total this title: N" and "N jobs collected" from agent output
                 print(f"  Found {len(found)} new jobs (total: {len(jobs)})")
@@ -978,7 +1204,29 @@ async def start_collection(body: CollectRequest):
         return _do_collect()
 
     _collection_thread = _run_async_in_thread(make_coro, _collection_status)
-    return {"success": True, "message": f"Collection started for {title or 'all titles'}"}
+    return {"success": True, "message": f"Collection started for {(search or {}).get('name') or title or 'all titles'}"}
+
+
+def _tag_new_jobs(search: dict, urls: list[str]) -> None:
+    """Attach newly collected jobs to their saved search; apply bans, categories and review-first."""
+    from core.searches import store as search_store, rules as search_rules
+    from core import jobs_store
+    cfg_rules = search_store.load()["rules"]
+    for url in urls:
+        job = jobs_store.get_job(url) or {}
+        fields = {"search_id": search["id"]}
+        cat = search_rules.category_for(job, cfg_rules)
+        if search.get("category_id"):
+            fields["category_id"] = search["category_id"]
+        elif cat:
+            fields["category_id"] = cat["id"]
+        reason = search_rules.ban_reason(job, cfg_rules, search)
+        if reason and job.get("status") == js.PENDING:
+            fields.update(status=js.BLOCKED, skip_reason=reason)
+            print(f"    ⏭️  Skipped {job.get('title', '')} at {job.get('company', '')}: {reason}")
+        elif search.get("mode") == "review" and job.get("status") == js.PENDING:
+            fields["review"] = "pending"
+        jobs_store.update_job(url, **fields)
 
 
 @app.post("/jobs/collect/stop")
@@ -1050,6 +1298,11 @@ async def start_applying(body: ApplyRequest):
         jobs = load_json(JOBS_FILE, {})
         profile = load_json(CANDIDATE_PROFILE, {})
         qa = load_json(QA_FILE, {})
+        try:  # user-defined answers (M7) take precedence over learned ones
+            from core.searches import store as search_store
+            qa = {**qa, **search_store.answers_dict()}
+        except Exception as e:  # pragma: no cover
+            print(f"⚠️  Could not load saved answers: {e}")
         LOGS_DIR.mkdir(exist_ok=True)
 
         if target_job_url:
@@ -1076,13 +1329,27 @@ async def start_applying(body: ApplyRequest):
                     j["status"] = "pending"
                     pending.append(j)
         elif easy_apply_filter is None:
-            pending = [j for j in jobs.values() if j.get("status") == "pending"]
+            pending = [j for j in jobs.values() if j.get("status") == "pending" and j.get("review") != "pending"]
         else:
             pending = [
                 j for j in jobs.values()
-                if j.get("status") == "pending"
+                if j.get("status") == "pending" and j.get("review") != "pending"
                 and (j.get("easy_apply") is True) == easy_apply_filter
             ]
+        # Bans added after collection still apply.
+        from core.searches import store as search_store, rules as search_rules
+        _scfg = search_store.load()
+        _kept = []
+        for j in pending:
+            _s = next((x for x in _scfg["searches"] if x["id"] == j.get("search_id")), None)
+            _reason = search_rules.ban_reason(j, _scfg["rules"], _s)
+            if _reason and not (target_job_url or target_job_urls):
+                from core.shared_config import update_job as _update_job
+                _update_job(j.get("url", ""), status="blocked", skip_reason=_reason)
+                print(f"⏭️  Skipped {j.get('title', '')} at {j.get('company', '')}: {_reason}")
+            else:
+                _kept.append(j)
+        pending = _kept
         if limit and not target_job_url and not target_job_urls:
             pending = pending[:limit]
 

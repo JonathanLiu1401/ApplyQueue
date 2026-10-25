@@ -417,6 +417,24 @@ async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[
             print(f"    ⚠️  [W{worker_id}] Browser cleanup error: {close_err}")
 
 
+def _routed_resume(job: dict) -> str | None:
+    """M7: pick the resume for this job (search > category > keywords > default) and record it for A/B stats."""
+    try:
+        try:
+            from core.searches import store as search_store, rules as search_rules
+        except ImportError:  # pragma: no cover
+            from backend.core.searches import store as search_store, rules as search_rules
+        resume, why = search_rules.route_resume(job, search_store.load())
+        if not resume or not Path(resume["path"]).is_file():
+            return None
+        update_job(job["url"], resume_id=resume["id"], resume_route=why)
+        print(f"  📄 Resume: {resume['name']} ({why})")
+        return resume["path"]
+    except Exception as e:  # never block an application on routing
+        print(f"  ⚠️  Resume routing failed: {e}")
+        return None
+
+
 async def worker(name: str, worker_id: int, queue: asyncio.Queue, profile: dict, qa: dict, applied_labels: list, easy_apply: bool, stats: dict, cancel_flag: dict | None = None):
     """Worker that pulls jobs from queue and applies."""
     while True:
@@ -429,7 +447,8 @@ async def worker(name: str, worker_id: int, queue: asyncio.Queue, profile: dict,
             break
 
         job_easy_apply = job.get("easy_apply", easy_apply) if job.get("easy_apply") is not None else easy_apply
-        status = await apply_to_job(job, profile, qa, applied_labels, job_easy_apply, worker_id)
+        status = await apply_to_job(job, profile, qa, applied_labels, job_easy_apply, worker_id,
+                                    resume_path_override=_routed_resume(job))
         stats[status] = stats.get(status, 0) + 1
 
         # On retry, put back in queue

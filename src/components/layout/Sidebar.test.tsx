@@ -47,6 +47,7 @@ describe("Sidebar", () => {
       "nav.guide",
       "nav.profile",
       "nav.llmSettings",
+      "nav.searches",
       "nav.jobs",
       "nav.memory",
       "nav.qa",

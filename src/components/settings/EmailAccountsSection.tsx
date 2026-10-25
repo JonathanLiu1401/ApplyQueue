@@ -156,7 +156,7 @@ export default function EmailAccountsSection() {
         setSettings((prev) => prev ?? r.settings);
         const s = r.last_sweep?.summary;
         if (r.last_sweep?.at && s) {
-          setLastSweep(`Last check ${new Date(r.last_sweep.at * 1000).toLocaleString()}: ${s.confirmed.length} confirmed, ${s.verification_archived} code emails archived.`);
+          setLastSweep(`Last check ${new Date(r.last_sweep.at * 1000).toLocaleString()}: ${s.confirmed.length} confirmed, ${s.verification_archived} code emails archived, ${s.interviews ?? 0} interviews, ${s.rejections ?? 0} rejections.`);
         }
       })
       .catch(() => setError("Could not load linked mailboxes."));
@@ -186,7 +186,7 @@ export default function EmailAccountsSection() {
     <Section title="Linked email">
       <p className="text-[13px] text-muted-foreground mb-4">
         Optional. With a linked mailbox ApplyQueue reads verification codes through the Gmail or Microsoft Graph API
-        (no webmail browsing), marks a job confirmed when its confirmation email arrives, and labels and archives
+        (no webmail browsing), marks a job confirmed when its confirmation email arrives, labels rejections and interview invitations, and labels and archives
         those emails. Only emails that match a job you applied to are touched; email bodies are not stored.
         Tokens stay in a private file on this computer.
       </p>
@@ -217,6 +217,22 @@ export default function EmailAccountsSection() {
               Archive after use
             </label>
           </div>
+          <div>
+            <label className="block text-sm font-semibold text-foreground mb-1.5">Rejection label</label>
+            <input className="input-base" value={settings.rejection_label ?? "ApplyQueue/Rejected"} aria-label="Rejection label"
+              onChange={(e) => setSettings({ ...settings, rejection_label: e.target.value })} />
+            <label className="flex items-center gap-2 text-[12px] text-muted-foreground mt-1">
+              <input type="checkbox" checked={!!settings.archive_rejections}
+                onChange={(e) => setSettings({ ...settings, archive_rejections: e.target.checked })} />
+              Archive rejections
+            </label>
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-foreground mb-1.5">Interview label</label>
+            <input className="input-base" value={settings.interview_label ?? "ApplyQueue/Interview"} aria-label="Interview label"
+              onChange={(e) => setSettings({ ...settings, interview_label: e.target.value })} />
+            <p className="text-[12px] text-muted-foreground mt-1">Interview invitations stay in your inbox.</p>
+          </div>
           <label className="flex items-center gap-2 text-[13px] text-foreground col-span-2">
             <input type="checkbox" checked={settings.auto_sweep}
               onChange={(e) => setSettings({ ...settings, auto_sweep: e.target.checked })} />
@@ -234,7 +250,7 @@ export default function EmailAccountsSection() {
                 setError(null);
                 try {
                   const r = await sweepEmail();
-                  setLastSweep(`Checked now: ${r.confirmed.length} confirmed, ${r.verification_archived} code emails archived.`);
+                  setLastSweep(`Checked now: ${r.confirmed.length} confirmed, ${r.verification_archived} code emails archived, ${r.interviews ?? 0} interviews, ${r.rejections ?? 0} rejections.`);
                 } catch (e) {
                   setError(errText(e));
                 } finally {

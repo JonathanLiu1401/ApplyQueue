@@ -25,8 +25,11 @@ except ImportError:  # pragma: no cover
 DEFAULT_SETTINGS = {
     "confirm_label": "ApplyQueue/Applied",
     "verification_label": "ApplyQueue/Verification",
+    "rejection_label": "ApplyQueue/Rejected",
+    "interview_label": "ApplyQueue/Interview",
     "archive_confirmations": True,
     "archive_verification": True,
+    "archive_rejections": False,
     "auto_sweep": True,
     "sweep_minutes": 10,
 }
@@ -56,11 +59,11 @@ def get_settings() -> dict:
 
 def clean_settings(body: dict) -> dict:
     out = get_settings()
-    for key in ("confirm_label", "verification_label"):
+    for key in ("confirm_label", "verification_label", "rejection_label", "interview_label"):
         if key in body:
             val = " ".join(str(body[key] or "").split())[:100]
             out[key] = val or DEFAULT_SETTINGS[key]
-    for key in ("archive_confirmations", "archive_verification", "auto_sweep"):
+    for key in ("archive_confirmations", "archive_verification", "archive_rejections", "auto_sweep"):
         if key in body:
             out[key] = bool(body[key])
     if "sweep_minutes" in body:
@@ -100,6 +103,15 @@ def _evidence(msg: dict) -> dict:
     return {"message_id": msg["id"], "provider": msg["provider"], "from_domain": msg.get("from_domain", ""),
             "subject": (msg.get("subject") or "")[:200],
             "received_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(msg.get("received_at") or 0))}
+
+
+def _record_response(url: str, kind: str, msg: dict) -> None:
+    """Record an employer response (interview beats rejection; a later interview overrides)."""
+    job = jobs_store.get_job(url) or {}
+    if job.get("response") == "interview" and kind == "rejection":
+        return
+    jobs_store.update_job(url, response=kind, response_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(
+        msg.get("received_at") or time.time())), response_email=_evidence(msg))
 
 
 def _label(provider: str, client, msg: dict, label: str, archive: bool) -> str | None:
@@ -181,7 +193,8 @@ def find_confirmations_for(job: dict, days: int = 14) -> list[dict]:
 def sweep(lookback_s: float | None = None) -> dict:
     """One pass over each linked inbox. Idempotent (processed ids are remembered)."""
     settings = get_settings()
-    summary = {"confirmed": [], "labeled": 0, "verification_archived": 0, "errors": [], "providers": []}
+    summary = {"confirmed": [], "labeled": 0, "verification_archived": 0, "rejections": [], "interviews": [],
+               "errors": [], "providers": []}
     jobs = [{**j, "url": j.get("url") or u} for u, j in jobs_store.read_jobs().items() if isinstance(j, dict)]
     with _lock:
         st = _load_state()
@@ -224,6 +237,16 @@ def sweep(lookback_s: float | None = None) -> dict:
                 if new_id:
                     summary["labeled"] += 1
                     _remember(p, [m["id"], new_id], "confirmation", job["url"])
+            elif k in ("rejection", "interview"):
+                job = classify.match_job(m, [j for j in jobs if js.is_submitted(j.get("status"))])
+                if not job:
+                    continue
+                _record_response(job["url"], k, m)
+                summary["rejections" if k == "rejection" else "interviews"].append(job["url"])
+                # Interview invitations are never archived: they need a reply.
+                label = settings["rejection_label" if k == "rejection" else "interview_label"]
+                new_id = _label(p, client, m, label, k == "rejection" and settings["archive_rejections"])
+                _remember(p, [m["id"]] + ([new_id] if new_id else []), k, job["url"])
             elif k == "verification":
                 recent = [j for j in jobs if j.get("status") in _ACTIVE and
                           classify._ts(j.get("claimed_at") or j.get("submitted_at") or 0) > time.time() - VERIFY_WINDOW_S]

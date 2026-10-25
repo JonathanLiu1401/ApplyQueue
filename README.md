@@ -40,7 +40,8 @@ models make more mistakes, so start in review-first mode. See
 | Email | Gmail used for OTP codes | **Gmail and Outlook** confirmation tracking and labeling |
 | Multiple machines/agents | Single machine | **Private GitHub sync repo** for queue, ledger, and credentials (refuses a public repo) |
 | Local models | Ollama supported | **Headline path:** runtime detection, vision-model recommender, one-click download |
-| Searches | Collect by title | **Saved searches** with stats and review-first or automatic mode; fully user-defined job domains |
+| Searches | Collect by title | **3-step quick start**, saved searches with stats and review-first or automatic mode, a tracker, resume routing with A/B stats and an ATS keyword check, your own categories, bans and answers |
+| Replies | Not tracked | Rejection and interview emails labelled `ApplyQueue/Rejected` and `ApplyQueue/Interview`; recruiter outreach off by default, drafts only |
 
 ## Why ApplyQueue
 

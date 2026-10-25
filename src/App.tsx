@@ -15,6 +15,7 @@ const Analytics = lazy(() => import("./pages/Analytics"));
 const Profile = lazy(() => import("./pages/Profile"));
 const LLMSettings = lazy(() => import("./pages/LLMSettings"));
 const Jobs = lazy(() => import("./pages/Jobs"));
+const Searches = lazy(() => import("./pages/Searches"));
 const Memory = lazy(() => import("./pages/Memory"));
 const SettingsPage = lazy(() => import("./pages/Settings"));
 const Logs = lazy(() => import("./pages/Logs"));
@@ -118,6 +119,7 @@ export default function App() {
               <Route path="/analytics" element={<Analytics />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/llm" element={<LLMSettings />} />
+              <Route path="/searches" element={<Searches />} />
               <Route path="/jobs" element={<Jobs />} />
               <Route path="/apply" element={<Navigate to="/jobs" replace />} />
               <Route path="/memory" element={<Memory />} />

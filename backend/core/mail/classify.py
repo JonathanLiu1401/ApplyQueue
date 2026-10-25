@@ -16,7 +16,16 @@ VERIFY_RE = re.compile(
     r"verification code|verify your (?:email|account|identity)|security code|one[- ]time (?:pass)?(?:code|password)"
     r"|\botp\b|sign[- ]?in code|log[- ]?in code|passcode|confirm your (?:email|account)|activate your account"
     r"|access code|authentication code|your code is|confirmation code", re.I)
-REJECT_RE = re.compile(r"unfortunately|not (?:be )?moving forward|other candidates|decided not to", re.I)
+REJECT_RE = re.compile(
+    r"unfortunately|not (?:be )?mov(?:e|ing) forward|other candidates|decided not to|regret to inform"
+    r"|will not be (?:proceeding|progressing|considered)|(?:position|role) has (?:been|now been) filled"
+    r"|no longer (?:being )?considered|not (?:been )?selected", re.I)
+INTERVIEW_RE = re.compile(
+    r"\binterview (?:invitation|invite|request|availability)|invit(?:e|ing) you (?:to|for) (?:an? )?(?:interview|call|chat)"
+    r"|schedule (?:an?|your|the) (?:interview|call|phone screen|chat|conversation)|phone screen"
+    r"|(?:your|share your|send (?:me|us) your) availability|next steps? in (?:the|our) (?:hiring|interview) process"
+    r"|would (?:like|love) to (?:schedule|set up|arrange|speak|chat|talk|move forward)"
+    r"|(?:like|happy|pleased) to move forward with your application|book a time|calendly\.com/", re.I)
 NEWSLETTER_RE = re.compile(r"job alert|jobs? (?:you may|for you)|recommended jobs|newsletter|unsubscribe from (?:job )?alerts", re.I)
 
 _KEYWORD_CODE = re.compile(
@@ -57,14 +66,16 @@ def _company_hit(company: str, hay: str, squashed: str) -> bool:
 
 
 def kind(msg: dict) -> str | None:
-    """'confirmation' | 'verification' | None."""
+    """'confirmation' | 'verification' | 'rejection' | 'interview' | None."""
     subj, text = msg.get("subject") or "", (msg.get("text") or "")[:4000]
     if NEWSLETTER_RE.search(subj):
         return None
     if VERIFY_RE.search(subj) or (VERIFY_RE.search(text[:1500]) and extract_code(subj + "\n" + text)):
         return "verification"
     if REJECT_RE.search(subj + " " + text[:1500]):
-        return None
+        return "rejection"
+    if INTERVIEW_RE.search(subj + " " + text[:2500]):
+        return "interview"
     if CONFIRM_RE.search(subj) or CONFIRM_RE.search(text[:1500]):
         return "confirmation"
     return None

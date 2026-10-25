@@ -8,6 +8,7 @@ class CollectRequest(BaseModel):
     max_jobs: int = Field(default=0, ge=0, le=500)
     source: str = Field(default="linkedin", description="Plugin name to collect from")
     filters: dict = Field(default_factory=dict, description="Plugin-specific filter key-value pairs")
+    search_id: Optional[str] = Field(default=None, max_length=40, description="Saved search to run (M7)")
 
 
 class ApplyRequest(BaseModel):

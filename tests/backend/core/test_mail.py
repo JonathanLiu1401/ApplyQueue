@@ -244,9 +244,42 @@ def test_kind_and_ambiguous_match():
     conf = {"subject": "Thank you for your application", "text": "Example Robotics team", "from_domain": "x.io",
             "received_at": time.time()}
     rej = {"subject": "Your application to Example Robotics", "text": "Unfortunately we will not be moving forward"}
-    assert classify.kind(conf) == "confirmation" and classify.kind(rej) is None
+    assert classify.kind(conf) == "confirmation" and classify.kind(rej) == "rejection"
     a = {"url": "https://a.example.com/1", "company": CO, "title": "Engineer"}
     b = {"url": "https://b.example.com/2", "company": CO, "title": "Designer"}
     assert classify.match_job(conf, [a, b]) is None  # same company, no title, no dates -> ambiguous
     conf["text"] += " Designer role"
     assert classify.match_job(conf, [a, b]) is b
+
+
+@pytest.mark.parametrize("subject,body,expected", [
+    ("Interview invitation: Robotics Engineer", "Hi Alex", "interview"),
+    ("Next steps", "We would like to schedule a call with you. Please share your availability.", "interview"),
+    ("Your application", "We regret to inform you the position has been filled.", "rejection"),
+    ("Update on your application", "We will not be moving forward, but would like to keep in touch.", "rejection"),
+    ("Thanks for applying", "We received your application.", "confirmation"),
+    ("Jobs you may like", "Schedule an interview with 20 companies", None),
+])
+def test_kind_rejection_and_interview(subject, body, expected):
+    assert classify.kind({"subject": subject, "text": body}) == expected
+
+
+def test_sweep_labels_rejections_and_interviews(mock, aq_data_dir):
+    link(mock, "gmail")
+    seed_jobs(aq_data_dir, now_iso=_iso_minutes_ago(60))
+    rej = mock.add_gmail(sender=f"Example Robotics <{GH_SENDER}>", subject="Your application to Example Robotics",
+                         body="Unfortunately we have decided not to proceed with your Robotics Engineer application.",
+                         minutes_ago=10)
+    inv = mock.add_gmail(sender="Acme Widgets <talent@acmewidgets.example.com>",
+                         subject="Acme Widgets - Data Analyst interview invitation",
+                         body="We would like to schedule a phone screen. Please share your availability.", minutes_ago=5)
+    s = service.sweep()
+    assert s["rejections"] == [JOB_A] and s["interviews"] == [JOB_B]
+    assert jobs_store.get_job(JOB_A)["response"] == "rejection"
+    assert jobs_store.get_job(JOB_B)["response"] == "interview"
+    assert mock.gmail_labels["ApplyQueue/Rejected"] in mock.gmail_msgs[rej]["labelIds"]
+    assert mock.gmail_labels["ApplyQueue/Interview"] in mock.gmail_msgs[inv]["labelIds"]
+    # Defaults: neither is archived (interviews never are).
+    assert "INBOX" in mock.gmail_msgs[rej]["labelIds"] and "INBOX" in mock.gmail_msgs[inv]["labelIds"]
+    again = service.sweep(lookback_s=3 * 86400)
+    assert again["rejections"] == [] and again["interviews"] == []

@@ -130,7 +130,8 @@ def claim_next_pending() -> dict | None:
             jobs = _load(jobs_file)
             picked = None
             for url, job in jobs.items():
-                if isinstance(job, dict) and job.get("status") == js.PENDING and not _remote_backoff(job):
+                if (isinstance(job, dict) and job.get("status") == js.PENDING and job.get("review") != "pending"
+                        and not _remote_backoff(job)):
                     job["status"] = js.IN_PROGRESS
                     job["claimed_at"] = datetime.now(timezone.utc).isoformat()
                     _save(jobs_file, jobs)

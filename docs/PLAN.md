@@ -306,7 +306,7 @@ M1 checklist (updated with each M1 commit):
 - [x] OTP via API: `get_email_code` (browser-use) / `email_get_otp` (MCP) replace mail.google.com
   browsing when a mailbox is linked; used codes are not handed out twice in a run.
 - [x] Mock OAuth/Gmail/Graph server (`tests/fixtures/mock_mail_server.py`) + API/UI tests.
-- [ ] Rejection/interview labels and recruiter drafts: deferred (not in this milestone's brief).
+- [x] Rejection/interview labels and recruiter drafts: done in M7 (see §5.6).
 - Setup notes: `docs/applyqueue/EMAIL_SETUP.md`.
 
 ### 5.4 M5 status (private GitHub sync repo)
@@ -343,6 +343,27 @@ M1 checklist (updated with each M1 commit):
 - [x] Onboarding step 1: "Run 100% locally, no subscription". README headline.
 - [x] Tests with mocked runtimes (`tests/fixtures/mock_local_llm.py`). Notes:
   `docs/applyqueue/LOCAL_MODELS.md`.
+
+### 5.6 M7 status (LoopCV-style searches)
+- [x] 3-step quick start on the new **Searches** page: CV, titles + locations, Start. It creates a
+  review-first saved search, fills empty profile targets and starts collecting.
+- [x] Named saved searches (`backend/core/searches/store.py`, `searches.json`) with per-search stats
+  (found, to review, applied, skipped, confirmed, interviews) and a mode: **review-first** (new jobs get
+  `review: "pending"` and are not claimed or applied until approved) or **auto**. `POST /searches/{id}/run`.
+- [x] Tracker dashboard (`GET /tracker`): totals and rates, per-search rows, review queue with
+  approve/skip, recent replies.
+- [x] Multiple resumes with routing (search → category → keyword match → default; recorded on the job
+  as `resume_id` / `resume_route`), resume A/B response and interview rates, and a local ATS keyword
+  check (no AI, `core/searches/ats.py`).
+- [x] Fully user-defined categories, bans (companies, title words, description words, per-search bans)
+  and saved answers (merged into the apply-time Q&A). Banned jobs are marked blocked with a reason.
+- [x] Starter packs (software, healthcare, retail, new grad) with fictional data only; merged without
+  duplicates and always review-first.
+- [x] Recruiter outreach: off by default, drafts only, never sent (`core/searches/outreach.py`).
+- [x] Rejection and interview emails are labelled `ApplyQueue/Rejected` and `ApplyQueue/Interview`
+  (configurable), recorded on the matching job as `response`; interview mail is never archived,
+  rejections only if you opt in.
+- [ ] Per-search schedules (cron-style reruns): not built; runs are manual for now.
 
 ## 6. Guardrails (unchanged)
 Private repo only; no GitHub fork; no upstream PRs, publishing, domains, or npm names without

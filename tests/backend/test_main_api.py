@@ -961,3 +961,84 @@ class TestLocalModelsApi:
         from mock_local_llm import dead_url
         r = auth_client.post("/local-models/pull", json={"model": "qwen3-vl:2b", "base_url": dead_url()}).json()
         assert r["success"] is False and "ollama.com" in r["message"]
+
+
+# ── M7: saved searches, tracker, resumes, packs, outreach ───────────────────
+class TestSearchesApi:
+    """LoopCV-style saved searches and tracker endpoints."""
+
+    def _jobs(self, data_dir, jobs):
+        import json as _json
+        (data_dir / "jobs.json").write_text(_json.dumps(jobs))
+
+    def test_quickstart_creates_review_search(self, auth_client, data_dir, monkeypatch, tmp_path):
+        cv = tmp_path / "cv.txt"
+        cv.write_text("Python SQL", encoding="utf-8")
+        started = {}
+
+        async def fake_start(req):
+            started["id"] = req.search_id
+            return {"success": True}
+        monkeypatch.setattr(main, "start_collection", fake_start)
+        r = auth_client.post("/searches/quickstart", json={
+            "resume_path": str(cv), "titles": ["Data Analyst"], "locations": ["Springfield"], "start": True})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["search"]["mode"] == "review" and body["resume"]["default"] is True
+        assert started["id"] == body["search"]["id"]
+        prof = auth_client.get("/profile").json()
+        prof = prof.get("profile", prof)
+        assert prof.get("target_job_titles") == ["Data Analyst"]
+        listing = auth_client.get("/searches").json()
+        assert listing["searches"][0]["stats"]["found"] == 0
+        assert listing["outreach"]["enabled"] is False and listing["starter_packs"]
+
+    def test_validation_is_400(self, auth_client):
+        assert auth_client.post("/searches", json={"titles": []}).status_code == 400
+        assert auth_client.post("/resumes", json={"path": "/nope/cv.pdf"}).status_code == 400
+        assert auth_client.delete("/searches/s_nope").status_code == 404
+        assert auth_client.post("/searches/s_nope/run").status_code == 404
+
+    def test_tag_review_and_tracker(self, auth_client, data_dir):
+        s = auth_client.post("/searches", json={"titles": ["Analyst"], "mode": "review"}).json()["search"]
+        auth_client.put("/searches/rules", json={"bans": {"companies": ["Example Staffing Agency"]}})
+        self._jobs(data_dir, {
+            "u1": {"url": "u1", "title": "Analyst", "company": "Acme", "status": "pending"},
+            "u2": {"url": "u2", "title": "Analyst", "company": "Example Staffing Agency", "status": "pending"},
+        })
+        main._tag_new_jobs(s, ["u1", "u2"])
+        from core import jobs_store
+        assert jobs_store.get_job("u1")["review"] == "pending"
+        assert jobs_store.get_job("u2")["status"] == "blocked"
+        assert jobs_store.claim_next_pending() is None  # review-pending jobs are not claimable
+        t = auth_client.get("/tracker").json()
+        assert [q["url"] for q in t["review_queue"]] == ["u1"] and t["searches"][0]["skipped"] == 1
+        assert auth_client.post("/jobs/review", json={"urls": ["u1"], "approve": True}).json()["updated"] == 1
+        assert jobs_store.claim_next_pending()["url"] == "u1"
+
+    def test_review_skip(self, auth_client, data_dir):
+        self._jobs(data_dir, {"u1": {"url": "u1", "title": "A", "status": "pending", "review": "pending"}})
+        auth_client.post("/jobs/review", json={"urls": ["u1"], "approve": False})
+        from core import jobs_store
+        j = jobs_store.get_job("u1")
+        assert j["status"] == "blocked" and j["skip_reason"] == "Skipped in review"
+
+    def test_ats_check_and_packs(self, auth_client, data_dir, tmp_path):
+        cv = tmp_path / "cv.md"
+        cv.write_text("Python and PostgreSQL developer", encoding="utf-8")
+        rid = auth_client.post("/resumes", json={"path": str(cv)}).json()["resume"]["id"]
+        r = auth_client.post("/resumes/ats-check", json={
+            "resume_id": rid, "description": "Python, Kubernetes, Kubernetes, PostgreSQL"}).json()
+        assert "kubernetes" in r["missing"] and "python" in r["matched"]
+        assert auth_client.post("/starter-packs/retail/apply").json()["searches_added"] >= 1
+        assert auth_client.post("/starter-packs/nope/apply").status_code == 404
+        assert auth_client.delete(f"/resumes/{rid}").json()["success"]
+
+    def test_outreach_drafts_only(self, auth_client, data_dir):
+        self._jobs(data_dir, {"u1": {"url": "u1", "title": "Data Analyst", "company": "Acme Widgets", "status": "pending"}})
+        assert auth_client.post("/outreach/draft", json={"job_url": "u1"}).status_code == 403
+        auth_client.put("/outreach", json={"enabled": True})
+        d = auth_client.post("/outreach/draft", json={"job_url": "u1"}).json()["draft"]
+        assert d["sent"] is False and "Acme Widgets" in d["body"]
+        assert len(auth_client.get("/outreach/drafts").json()) == 1
+        assert auth_client.delete(f"/outreach/drafts/{d['id']}").json()["success"]

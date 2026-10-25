@@ -521,6 +521,9 @@ export interface EmailSettings {
   verification_label: string;
   archive_confirmations: boolean;
   archive_verification: boolean;
+  rejection_label?: string;
+  interview_label?: string;
+  archive_rejections?: boolean;
   auto_sweep: boolean;
   sweep_minutes: number;
 }
@@ -529,6 +532,8 @@ export interface EmailSweepSummary {
   confirmed: string[];
   labeled: number;
   verification_archived: number;
+  rejections?: number;
+  interviews?: number;
   errors: string[];
 }
 
@@ -743,4 +748,186 @@ export async function selectLocalModel(runtime: string, base_url: string, model:
     method: "POST",
     body: JSON.stringify({ runtime, base_url, model }),
   });
+}
+
+// ── Saved searches, tracker, resumes, starter packs, outreach (M7) ────────
+export interface SearchStats {
+  found: number;
+  review: number;
+  applied: number;
+  skipped: number;
+  confirmed: number;
+  interviews: number;
+  rejections: number;
+  responses: number;
+  response_rate: number;
+  interview_rate: number;
+}
+
+export interface SavedSearch {
+  id: string;
+  name: string;
+  titles: string[];
+  locations: string[];
+  mode: "review" | "auto";
+  resume_id: string | null;
+  category_id: string | null;
+  max_jobs: number;
+  filters: Record<string, unknown>;
+  bans: { companies: string[]; keywords: string[] };
+  created_at?: string;
+  last_run_at?: string | null;
+  stats?: Partial<SearchStats>;
+}
+
+export interface SearchCategory {
+  id: string;
+  name: string;
+  keywords: string[];
+  resume_id?: string | null;
+}
+
+export interface SearchRules {
+  categories: SearchCategory[];
+  bans: { companies: string[]; title_keywords: string[]; description_keywords: string[] };
+  answers: { question: string; answer: string }[];
+}
+
+export interface ResumeVariant {
+  id: string;
+  name: string;
+  path: string;
+  keywords: string[];
+  default: boolean;
+}
+
+export interface OutreachSettings {
+  enabled: boolean;
+  template: string;
+}
+
+export interface OutreachDraft {
+  id: string;
+  job_url: string;
+  title?: string;
+  company?: string;
+  body: string;
+  created_at: string;
+  sent: false;
+}
+
+export interface StarterPack {
+  id: string;
+  name: string;
+  description: string;
+  searches: number;
+  categories: string[];
+}
+
+export interface SearchesOverview {
+  searches: SavedSearch[];
+  rules: SearchRules;
+  resumes: ResumeVariant[];
+  outreach: OutreachSettings;
+  starter_packs: StarterPack[];
+}
+
+export interface TrackerRow extends SearchStats {
+  id: string;
+  name: string;
+  mode?: string;
+}
+
+export interface TrackerJob {
+  url: string;
+  title?: string;
+  company?: string;
+  location?: string;
+  search_id?: string;
+  response?: string;
+  at?: string;
+}
+
+export interface Tracker {
+  totals: SearchStats;
+  searches: TrackerRow[];
+  resumes: TrackerRow[];
+  unassigned: SearchStats;
+  recent_responses: TrackerJob[];
+  review_queue: TrackerJob[];
+}
+
+const jsonPost = (body: unknown, method = "POST"): RequestInit => ({ method, body: JSON.stringify(body) });
+
+export async function getSearches() {
+  return request<SearchesOverview>("/searches");
+}
+
+export async function saveSearch(search: Partial<SavedSearch>) {
+  return request<{ success: boolean; search: SavedSearch }>("/searches", jsonPost(search));
+}
+
+export async function deleteSearch(id: string) {
+  return request<{ success: boolean }>(`/searches/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function runSearch(id: string) {
+  return request<{ success: boolean; message?: string }>(`/searches/${encodeURIComponent(id)}/run`, { method: "POST" });
+}
+
+export async function quickStartSearch(body: { resume_path?: string; titles: string[]; locations: string[]; start: boolean }) {
+  return request<{ success: boolean; search: SavedSearch; started?: { success: boolean; message?: string } | null }>(
+    "/searches/quickstart",
+    jsonPost(body),
+  );
+}
+
+export async function saveSearchRules(rules: Partial<SearchRules>) {
+  return request<{ success: boolean; rules: SearchRules }>("/searches/rules", jsonPost(rules, "PUT"));
+}
+
+export async function getTracker() {
+  return request<Tracker>("/tracker");
+}
+
+export async function reviewJobs(urls: string[], approve: boolean) {
+  return request<{ success: boolean; updated: number }>("/jobs/review", jsonPost({ urls, approve }));
+}
+
+export async function addResume(body: { path: string; name?: string; keywords?: string[]; default?: boolean }) {
+  return request<{ success: boolean; resume: ResumeVariant }>("/resumes", jsonPost(body));
+}
+
+export async function deleteResume(id: string) {
+  return request<{ success: boolean }>(`/resumes/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function atsCheck(body: { resume_id: string; description?: string; job_url?: string }) {
+  return request<{ success: boolean; score: number; matched: string[]; missing: string[] }>(
+    "/resumes/ats-check",
+    jsonPost(body),
+  );
+}
+
+export async function applyStarterPack(id: string) {
+  return request<{ success: boolean; searches_added: number; categories: number }>(
+    `/starter-packs/${encodeURIComponent(id)}/apply`,
+    { method: "POST" },
+  );
+}
+
+export async function saveOutreach(body: Partial<OutreachSettings>) {
+  return request<{ success: boolean; outreach: OutreachSettings }>("/outreach", jsonPost(body, "PUT"));
+}
+
+export async function getOutreachDrafts() {
+  return request<OutreachDraft[]>("/outreach/drafts");
+}
+
+export async function createOutreachDraft(job_url: string) {
+  return request<{ success: boolean; draft: OutreachDraft }>("/outreach/draft", jsonPost({ job_url }));
+}
+
+export async function deleteOutreachDraft(id: string) {
+  return request<{ success: boolean }>(`/outreach/drafts/${encodeURIComponent(id)}`, { method: "DELETE" });
 }

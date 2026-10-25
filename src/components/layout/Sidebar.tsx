@@ -13,6 +13,7 @@ import {
   MessageSquare,
   HelpCircle,
   BarChart3,
+  ListChecks,
 } from "lucide-react";
 import { checkHealth } from "../../lib/api";
 
@@ -22,6 +23,7 @@ const navItems = [
   { to: "/guide", icon: BookOpen, labelKey: "nav.guide" },
   { to: "/profile", icon: User, labelKey: "nav.profile" },
   { to: "/llm", icon: Cpu, labelKey: "nav.llmSettings" },
+  { to: "/searches", icon: ListChecks, labelKey: "nav.searches" },
   { to: "/jobs", icon: Briefcase, labelKey: "nav.jobs" },
   { to: "/memory", icon: Brain, labelKey: "nav.memory" },
   { to: "/qa", icon: HelpCircle, labelKey: "nav.qa" },

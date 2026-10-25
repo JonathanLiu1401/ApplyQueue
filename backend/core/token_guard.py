@@ -10,6 +10,7 @@ OAuth/API credentials. The same detector scrubs CLI output before it is logged.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -133,8 +134,15 @@ def safe_sync_append(repo_root: Path, rel_path: str, line: str) -> Path:
     target = _sync_target(repo_root, rel_path)
     check_sync_payload(rel_path, line)
     target.parent.mkdir(parents=True, exist_ok=True)
+    # A crash or a hand edit can leave the file without a trailing newline; appending straight
+    # after it would glue this event onto that line and both would be unparseable.
+    sep = ""
+    if target.exists() and target.stat().st_size:
+        with open(target, "rb") as fh:
+            fh.seek(-1, os.SEEK_END)
+            sep = "" if fh.read(1) == b"\n" else "\n"
     with open(target, "a", encoding="utf-8", newline="\n") as fh:
-        fh.write(line + "\n")
+        fh.write(sep + line + "\n")
     return target
 
 

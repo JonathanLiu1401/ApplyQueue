@@ -64,10 +64,15 @@ class GitRepo:
         git = git_available()
         if not git:
             raise GitError("git is not installed. Install git (macOS: xcode-select --install) to use sync.")
-        p = subprocess.run([git, "-c", "core.autocrlf=false", "-c", "core.quotepath=false",
-                            "-c", "init.defaultBranch=main", *args],
-                           cwd=str(cwd or self.path), env=self._env(), capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=timeout)
+        try:
+            p = subprocess.run([git, "-c", "core.autocrlf=false", "-c", "core.quotepath=false",
+                                "-c", "init.defaultBranch=main", *args],
+                               cwd=str(cwd or self.path), env=self._env(), capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=timeout)
+        except subprocess.TimeoutExpired as e:
+            # A stalled connection (Wi-Fi drop mid-push, captive portal) hangs git rather than
+            # failing it. Treat it as offline so the commit stays queued for the next sync.
+            raise NetworkError(f"git {args[0]} timed out after {timeout}s", str(e)) from None
         if check and p.returncode != 0:
             err = (p.stderr or p.stdout or "").strip()
             low = err.lower()

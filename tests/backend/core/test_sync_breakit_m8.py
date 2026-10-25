@@ -106,3 +106,100 @@ def test_two_devices_racing_for_the_same_jobs_apply_each_exactly_once(world):
         final = {u: j["status"] for u, j in jobs_store.read_jobs().items()}
         assert set(final.values()) == {js.SUBMITTED_UNCONFIRMED}, (dev, final)
     assert not [p for p in world.remote_tree() if p.startswith("locks/")]
+
+
+# ── network stalls mid-push ──
+def test_push_that_hangs_is_offline_and_resyncs(world, monkeypatch):
+    a = world.use("laptop", kind="git")
+    add_job(JOB_A)
+    assert a.sync_now()["pushed"]
+    hook = world.remote / "hooks" / "pre-receive"
+    hook.write_text("#!/bin/sh\nsleep 30\nexit 1\n")   # a stalled link: the push never finishes
+    hook.chmod(0o755)
+    real = gitrepo.GitRepo.run
+
+    def short(self, *args, **kw):
+        if args and args[0] == "push":
+            kw["timeout"] = 2
+        return real(self, *args, **kw)
+
+    monkeypatch.setattr(gitrepo.GitRepo, "run", short)
+    jobs_store.update_job(JOB_A, status=js.SUBMITTED_UNCONFIRMED)
+    t0 = time.monotonic()
+    r = a.sync_now()
+    assert time.monotonic() - t0 < 25
+    assert r["offline"] and r["pending"] >= 1, r
+    hook.unlink()
+    r = a.sync_now()
+    assert r["pushed"] and r["pending"] == 0, r
+    assert '"event":"submitted"' in world.remote_file(LEDGER)
+
+
+# ── a ledger left without its trailing newline ──
+def test_append_after_truncated_ledger_line_keeps_both_events(world):
+    a = world.use("laptop", kind="git")
+    add_job(JOB_A)
+    a.sync_now()
+    p = store.repo_dir() / LEDGER
+    p.write_text(p.read_text().rstrip("\n"))            # crash / hand edit dropped the newline
+    before = len(a.read_ledger())
+    jobs_store.update_job(JOB_A, status=js.SUBMITTED_UNCONFIRMED)
+    assert a.sync_now()["pushed"]
+    rows = a.read_ledger()
+    assert len(rows) == before + 1 and rows[-1]["event"] == "submitted"
+    b = world.use("desktop", kind="git")
+    b.sync_now()
+    assert jobs_store.read_jobs()[JOB_A]["status"] == js.SUBMITTED_UNCONFIRMED
+
+
+def test_remote_ledger_without_trailing_newline_merges(world):
+    a = world.use("laptop", kind="git")
+    add_job(JOB_A)
+    a.sync_now()
+    other = world.tmp / "other"
+    git("clone", "-q", str(world.remote), str(other), cwd=world.tmp)
+    led = other / LEDGER
+    row = {"id": "ext-1", "event": "submitted", "job_key": job_key(JOB_A), "url": JOB_A,
+           "device": "device-other", "ts": "2026-10-25T10:00:00+00:00"}
+    led.write_text(led.read_text() + json.dumps(row))   # no newline at EOF
+    git("commit", "-qam", "other", cwd=other)
+    git("push", "-q", "origin", "HEAD:main", cwd=other)
+    jobs_store.update_job(JOB_A, notes="local edit")
+    a.append_event(JOB_A, "claimed")
+    assert a.sync_now()["pushed"]
+    events = [r["event"] for r in a.read_ledger() if r.get("job_key") == job_key(JOB_A)]
+    assert "submitted" in events and "claimed" in events
+
+
+# ── visibility flipped to public right before a claim ──
+def test_claim_while_repo_turned_public_pushes_nothing(world):
+    a = world.use("laptop")
+    add_job(JOB_A)
+    assert a.sync_now()["pushed"]
+    CredentialVault.default().get_or_create("boards.greenhouse.io", "alex@example.com")
+    tree = world.remote_tree()
+    world.gh.set_visibility(FULL, "public")
+    # the claim still works locally (sync is advisory), but nothing reaches the public remote
+    assert jobs_store.claim_job(JOB_A) is True
+    assert world.remote_tree() == tree
+    assert world.remote_file(f"locks/{job_key(JOB_A)}.json") is None
+    assert world.remote_file("credentials/portals.json") is None
+    assert a.status()["visibility_error"]
+
+
+# ── very large browser sessions ──
+def test_huge_session_stays_local_and_is_fast(world):
+    a = world.use("laptop")
+    a.sync_now()
+    blob = "x" * (20 * 1024 * 1024)
+    state = {"cookies": [{"domain": ".greenhouse.io", "name": "_s", "value": "v" * 40}],
+             "origins": [{"origin": "https://boards.greenhouse.io",
+                          "localStorage": [{"name": "cache", "value": blob}]}]}
+    t0 = time.monotonic()
+    r = a.save_session("default", state)
+    assert time.monotonic() - t0 < 20
+    assert r["saved"] == "local" and r["too_large"], r
+    assert world.remote_file("sessions/default/storage.json") is None
+    assert a.load_session("default")["cookies"][0]["name"] == "_s"
+    small = {"cookies": state["cookies"], "origins": []}
+    assert a.save_session("default", small)["saved"] == "repo"

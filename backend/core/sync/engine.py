@@ -46,6 +46,7 @@ from .gitrepo import GitError, GitRepo, NetworkError, PushRejected, git_availabl
 log = logging.getLogger(__name__)
 
 LEDGER = "ledger/applications.jsonl"
+SESSION_SYNC_MAX_BYTES = 5 * 1024 * 1024
 PORTALS = "credentials/portals.json"
 README = """# ApplyQueue state (private)
 
@@ -632,6 +633,11 @@ class SyncEngine:
         store.write_private(local, clean)
         if not (self.credentials_allowed() and self.cfg.get("sync_sessions")):
             return {"saved": "local", "cookies": len(clean["cookies"])}
+        if len(text.encode("utf-8")) > SESSION_SYNC_MAX_BYTES:
+            # Every save is a new blob in git history forever, and GitHub rejects files over
+            # 100 MB. A session this big is almost all site localStorage; keep it on this device.
+            return {"saved": "local", "too_large": True, "bytes": len(text.encode("utf-8")),
+                    "cookies": len(clean["cookies"])}
         with self._lock:
             repo = self.ensure_repo()
             try:

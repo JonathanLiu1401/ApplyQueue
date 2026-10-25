@@ -1,5 +1,6 @@
 """M4: Gmail / Outlook linking, OTP via API, confirmation sweep — against mock OAuth/Gmail/Graph servers."""
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -62,7 +63,8 @@ def test_gmail_link_pkce_and_day6_reauth(mock, aq_data_dir):
     assert st["client_secret_set"] and "desktop-secret" not in json.dumps(st)
     assert "rt-" not in json.dumps(st) and "at-" not in json.dumps(st)
     assert oauth.status("gmail", now=time.time() + 6 * 86400 + 5)["reauth_due"]
-    assert (oauth.accounts_file().stat().st_mode & 0o077) == 0
+    if os.name != "nt":  # POSIX permissions; on Windows the file lives in the per-user profile
+        assert (oauth.accounts_file().stat().st_mode & 0o077) == 0
     # Re-connecting (the one-click prompt) resets the 6-day clock.
     url2 = oauth.start_authorization("gmail", PORT)
     assert "login_hint=alex%40example.com" in url2

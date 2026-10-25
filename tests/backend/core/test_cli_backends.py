@@ -91,7 +91,8 @@ def test_detect_finds_shim_on_path(monkeypatch, tmp_path):
         shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{FAKE}" --as codex --mode stream "$@"\n')
         shim.chmod(0o755)
     monkeypatch.setenv("PATH", str(bindir) + os.pathsep + os.environ.get("PATH", ""))
-    assert resolve_command(SPECS["codex"], {}) == [str(shim)]
+    got = resolve_command(SPECS["codex"], {})
+    assert [os.path.normcase(c) for c in got] == [os.path.normcase(str(shim))]  # Windows may report .CMD
     info = detect(SPECS["codex"], {})
     assert info["installed"] and info["auth"]["state"] == "logged_in"
 

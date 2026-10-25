@@ -413,19 +413,32 @@ def _yes_no(v: Any) -> str | None:
     return None
 
 
+def _d(v: Any) -> dict:
+    return v if isinstance(v, dict) else {}
+
+
+def _s(v: Any) -> str:
+    """Profile scalars as text. A hand-edited or imported profile can carry numbers, lists or
+    nulls where strings belong; those must not crash a run halfway through a form."""
+    if v is None or isinstance(v, (dict, list, tuple, set)):
+        return ""
+    return str(v).strip()
+
+
 def _profile_answer(label: str, profile: dict, context: dict) -> str | None:
-    p = profile or {}
-    name = (p.get("name") or "").strip()
+    p = _d(profile)
+    name = " ".join(_s(p.get("name")).split())
     first, _, last = name.partition(" ")
-    addr = p.get("address") or {}
-    sal = p.get("salary_expectation") or {}
+    addr = _d(p.get("address"))
+    sal = _d(p.get("salary_expectation"))
+    context = _d(context)
     l = normalize(label)
     rules: list[tuple[str, Any]] = [
         (r"\bfirst name\b|\bgiven name\b", first),
         (r"\blast name\b|\bsurname\b|\bfamily name\b", last.strip()),
         (r"\b(full |legal )?name\b", name),
         (r"\be-?mail\b", p.get("email")),
-        (r"\bphone\b|\bmobile\b|\btelephone\b", f"{p.get('phone_country_code', '')}{p.get('phone', '')}".strip()),
+        (r"\bphone\b|\bmobile\b|\btelephone\b", (f"{_s(p.get('phone_country_code'))}{_s(p.get('phone'))}" if _s(p.get("phone")) else "")),
         (r"\blinkedin\b", p.get("linkedin") or p.get("linkedin_url")),
         (r"\bgithub\b", p.get("github")),
         (r"\b(website|portfolio|personal site)\b", p.get("website") or p.get("portfolio") or p.get("github")),
@@ -446,14 +459,14 @@ def _profile_answer(label: str, profile: dict, context: dict) -> str | None:
         (r"\b(salary|compensation|pay) (expectation|requirement|range)s?\b|\bdesired (salary|pay)\b",
          (f"{sal.get('min')}" if sal.get("min") else None)),
         (r"\bhow did you (hear|find|learn)\b|\bsource\b|\breferr(ed|al) source\b", context.get("source")),
-        (r"\b(school|university|college)\b", (p.get("education") or {}).get("school")),
-        (r"\bdegree\b", (p.get("education") or {}).get("degree")),
+        (r"\b(school|university|college)\b", _d(p.get("education")).get("school")),
+        (r"\bdegree\b", _d(p.get("education")).get("degree")),
         (r"\bnationality\b|\bcitizenship\b", p.get("nationality")),
         (r"\bpronouns?\b", p.get("pronouns")),
     ]
     for pattern, value in rules:
-        if re.search(pattern, l) and value not in (None, ""):
-            return str(value)
+        if re.search(pattern, l) and _s(value):
+            return _s(value)
     return None
 
 
@@ -472,12 +485,15 @@ def best_option(options: list[dict], answer: str) -> str | None:
     labels = [(o.get("label") or o.get("value") or "") for o in options]
     real = [t for t in labels if t and not re.match(r"^(select|choose|please|--|—)", t, re.I)]
     a = normalize(answer)
+    if not a:
+        return None          # "?" or "" normalizes to nothing, and "" is a prefix of every option
     for t in real:
         if normalize(t) == a:
             return t
     for t in real:
+        # whole-word prefixes only: "No" is not "None of the above" or "Norway"
         nt = normalize(t)
-        if nt and (nt.startswith(a) or a.startswith(nt)):
+        if nt and (nt.startswith(a + " ") or a.startswith(nt + " ")):
             return t
     m = difflib.get_close_matches(a, [normalize(t) for t in real], n=1, cutoff=0.6)
     if m:
@@ -499,7 +515,7 @@ def plan_answer(f: Field, profile: dict, qa: dict, context: dict | None = None) 
         return None  # uploads are done by the agent's upload action
     answer: str | None = None
     if cat == "eeo":
-        eeo = (profile or {}).get("eeo") or {}
+        eeo = _d(_d(profile).get("eeo"))
         for k, v in eeo.items():
             if v and k.lower() in normalize(f.label):
                 answer = str(v)
@@ -512,9 +528,9 @@ def plan_answer(f: Field, profile: dict, qa: dict, context: dict | None = None) 
             answer = pick_decline_option(f.options) if f.options else "Prefer not to say"
         return answer
     if cat == "cover_letter":
-        cl = (profile or {}).get("cover_letter")
+        cl = _s(_d(profile).get("cover_letter"))
         if cl:
-            return str(cl)
+            return cl
     answer = answer_bank_lookup(f.label, qa)
     if answer is None:
         answer = _profile_answer(f.label, profile, context)

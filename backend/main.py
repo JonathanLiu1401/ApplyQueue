@@ -603,8 +603,17 @@ async def health():
 async def get_profile():
     return load_profile()
 
+PROFILE_MAX_BYTES = 1024 * 1024
+
+
 @app.put("/profile")
 async def update_profile(profile: dict):
+    # The profile rides along in every apply prompt: a pasted 20 MB blob would make each run slow
+    # and expensive (or overflow the model's context) instead of failing here, visibly.
+    size = len(json.dumps(profile, ensure_ascii=False).encode("utf-8"))
+    if size > PROFILE_MAX_BYTES:
+        raise HTTPException(status_code=413, detail=f"Profile is too large ({size // 1024} KB; the limit is "
+                                                    f"{PROFILE_MAX_BYTES // 1024} KB). Shorten long notes or answers.")
     save_profile(profile)
     return {"success": True}
 

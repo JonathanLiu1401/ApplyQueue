@@ -135,3 +135,31 @@ def test_outreach_off_by_default_and_drafts_only(cfg_dir):
     assert "{0}" in d["body"] and "{name.__class__}" in d["body"]  # no str.format attribute access
     assert store.list_drafts()[0]["id"] == d["id"]
     assert outreach.delete(d["id"]) and store.list_drafts() == []
+
+
+def test_resumes_with_identical_names_and_file_names_stay_distinct(cfg_dir, tmp_path):
+    # M8: two "Resume" entries, both files called resume.pdf in different folders
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    pa, pb = tmp_path / "a" / "resume.txt", tmp_path / "b" / "resume.txt"
+    pa.write_text("Python developer", encoding="utf-8")
+    pb.write_text("Data analyst SQL", encoding="utf-8")
+    a = store.add_resume({"path": str(pa), "name": "Resume"})
+    b = store.add_resume({"path": str(pb), "name": "Resume", "keywords": ["sql"]})
+    assert a["id"] != b["id"] and a["name"] == b["name"] == "Resume"
+    s = store.upsert_search({"titles": ["Analyst"], "resume_id": b["id"]})
+    cfg = store.load()
+    assert rules.route_resume({"search_id": s["id"], "title": "Analyst"}, cfg)[0]["path"] == str(pb)
+    assert rules.route_resume({"title": "Chef"}, cfg)[0]["path"] == str(pa)
+    store.delete_resume(a["id"])                      # deleting one never takes the other with it
+    left = store.load()["resumes"]
+    assert [r["id"] for r in left] == [b["id"]] and left[0]["default"]
+    assert store.get_search(s["id"])["resume_id"] == b["id"]
+
+
+def test_resume_name_unicode_and_overlong(cfg_dir, tmp_path):
+    p = tmp_path / "résumé-ñ.txt"
+    p.write_text("x", encoding="utf-8")
+    r = store.add_resume({"path": str(p), "name": "Résumé 📄 " + "ي" * 200})
+    assert r["name"].startswith("Résumé 📄") and len(r["name"]) <= 80
+    assert store.add_resume({"path": str(p)})["name"] == "résumé-ñ"

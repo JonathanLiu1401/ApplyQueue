@@ -183,6 +183,39 @@ class TestProfile:
         assert loaded["skills"] == ["Python", "React"]
 
 
+class TestProfileBreakItM8:
+    """Unicode / RTL / emoji / very long values survive a round trip; oversize and corrupt
+    profiles fail visibly instead of poisoning every run."""
+
+    def test_unicode_rtl_emoji_and_long_answers_roundtrip(self, auth_client):
+        profile = {"name": "Alex Exámple-Ñúñez", "preferred_name": "أليكس مثال", "pronouns": "they/them 🌈",
+                   "address": {"city": "Zürich", "state": "", "zip": "", "country": "Switzerland"},
+                   "notes": "‏מבחן RTL‏ " + "long answer " * 5000, "cover_letter": ""}
+        assert auth_client.put("/profile", json=profile).status_code == 200
+        got = auth_client.get("/profile").json()
+        assert got == profile
+        raw = (main.get_data_dir() / "candidate_profile.json").read_bytes()
+        assert "أليكس".encode() in raw or b"\\u" in raw   # stored as UTF-8 or escaped, never mangled
+
+    def test_oversize_profile_is_refused_and_old_one_kept(self, auth_client):
+        assert auth_client.put("/profile", json={"name": "Alex Example"}).status_code == 200
+        r = auth_client.put("/profile", json={"name": "Alex Example", "notes": "x" * (2 * 1024 * 1024)})
+        assert r.status_code == 413 and "too large" in r.json()["detail"]
+        assert auth_client.get("/profile").json() == {"name": "Alex Example"}
+
+    def test_malformed_profile_file_falls_back_to_defaults(self, auth_client):
+        path = main.get_data_dir() / "candidate_profile.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        for junk in (b'{"name": "Alex Ex', b'["not", "a", "profile"]', b"\x00\xff garbage"):
+            path.write_bytes(junk)
+            r = auth_client.get("/profile")
+            assert r.status_code == 200 and r.json()["name"] == ""
+            assert not path.exists() or path.read_bytes() != junk  # quarantined, not re-read
+
+    def test_non_object_profile_rejected(self, auth_client):
+        assert auth_client.put("/profile", json=["Alex Example"]).status_code == 422
+
+
 # ── App settings CRUD ─────────────────────────────────────────────────────────
 class TestAppSettings:
     """GET/PUT /settings including server-side clamping."""

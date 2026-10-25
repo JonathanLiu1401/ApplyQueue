@@ -1,41 +1,49 @@
-# Security policy
+# Security Policy
 
-ApplyQueue handles sensitive things on your behalf: job-portal passwords, browser sessions,
-email access, and your personal profile. We take reports seriously.
+## Supported Versions
 
-## Reporting a vulnerability
+| Version | Supported          |
+| ------- | ------------------ |
+| 1.x     | Yes                |
+| < 1.0   | No                 |
 
-**Please do not open a public issue.** Report privately via
-[GitHub Security Advisories](https://github.com/JonathanLiu1401/ApplyQueue/security/advisories/new).
-Include steps to reproduce and the affected version. Never include real credentials or
-personal data in a report; use the fictional "Alex Example" persona.
+Only the latest release receives security updates.
 
-We aim to acknowledge reports within 7 days. ApplyQueue is pre-alpha and has no stable
-release yet; fixes land on `main`.
+## Reporting a Vulnerability
 
-## Where your data lives (by design)
+**Please do NOT open a public GitHub issue for security vulnerabilities.**
 
-| Data | Where | Never |
-| --- | --- | --- |
-| Profile, answers, queues | Your computer (app data folder) | In this public repo |
-| Portal passwords, browser sessions | Your **private** sync repo on your GitHub account (default), mirrored in an OS-encrypted local vault | In this public repo, in logs, in AI prompts |
-| Email access | OAuth tokens in the local vault (Gmail/Outlook re-auth every 7 days in testing mode) | Shared with any AI backend |
+Instead, use one of these private channels:
 
-- The app verifies your sync repo is **private** through the GitHub API before every
-  credential write and refuses to write if it is public or the check fails.
-- AI backends receive secrets only through the `fill_secret` tool, which types the value into
-  the browser field without returning it to the model.
-- Encrypting credential files inside the private sync repo is a planned option, not yet a
-  default.
+1. **GitHub Security Advisories** (preferred): Go to the [Security tab](https://github.com/jaimaann/LangHire/security/advisories) and click "Report a vulnerability"
+2. **Email**: Contact the maintainer directly via GitHub profile
+
+### What to include
+
+- Description of the vulnerability
+- Steps to reproduce
+- Potential impact
+- Suggested fix (if any)
+
+### Response timeline
+
+- **Acknowledgment**: Within 72 hours
+- **Initial assessment**: Within 1 week
+- **Fix release**: Depends on severity (critical: ASAP, high: 1-2 weeks, medium/low: next release)
 
 ## Scope
 
-In scope: the desktop app, the ApplyQueue MCP server, CI configuration, and anything that
-could leak secrets or personal data. Out of scope: vulnerabilities in third-party job sites
-or AI providers (report those to them).
+The following are considered security issues:
 
-## Repository hygiene
+- API token leakage or bypass of authentication middleware
+- Credential exposure (LLM API keys, browser session cookies, user passwords)
+- Unauthorized access to the browser profile or stored data
+- Server-Side Request Forgery (SSRF) via job URLs
+- Remote code execution through crafted inputs
+- Path traversal in resume file handling
 
-Every push and pull request runs [gitleaks](https://github.com/gitleaks/gitleaks) over the
-full history plus a personal-data scan (`scripts/privacy-scan.mjs`) that rejects real email
-addresses, phone numbers, browser-profile files, cookie/password stores, and databases.
+The following are NOT security issues (file as regular bugs):
+
+- Rate limiting bypass on localhost-only endpoints
+- Denial of service on a single-user desktop app
+- UI rendering issues

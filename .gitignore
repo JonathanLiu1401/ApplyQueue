@@ -1,48 +1,81 @@
-# --- build output / deps ---
+# ── Python ────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[oc]
+*.egg-info
+wheels/
+
+# Virtual environments
+.venv
+.python-version
+
+# ── Node.js ───────────────────────────────────────────────────────────────
 node_modules/
-out/
 dist/
-release/
-coverage/
-*.tsbuildinfo
-.vite/
+*.local
+
+# ── Tauri ─────────────────────────────────────────────────────────────────
+src-tauri/target/
+src-tauri/gen/
+
+# ── User Data (sensitive / personal) ──────────────────────────────────────
+candidate_profile.json
+qa_repository.json
+jobs.json
+applied_jobs.json
+memory_store.db
+memory_store.db-wal
+memory_store.db-shm
+memory_export.json
+
+# Browser profiles (large, user-specific cookies/sessions)
+browser_profile/
+browser_profile_w*/
+
+# Logs (large, per-run conversation logs)
+logs/
+
+# Resumes (user-specific)
+resumes/
+
+# Fonts (redistributable but large)
+fonts/
+
+# Lock files
+jobs.json.lock
+uv.lock
+
+# ── OS Files ──────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 
-# --- secrets: never commit to this PUBLIC repo ---
-.env
-.env.*
-!.env.example
-*.pem
-*.key
-*.p12
-*.pfx
-*.age
-*.keychain*
-credentials/
-sessions/
-browser-profiles/
-**/profiles/
-**/*password*.txt
-**/Cookies
-**/Cookies-journal
-**/Login Data*
-**/Local State
-**/Web Data
+# ── IDE ───────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+.kiro/
+*.swp
+*.swo
 
-# --- personal data: belongs in your PRIVATE sync repo / app data dir, not here ---
-PERSONAL_DATA_INVENTORY.md
-*INVENTORY*.md
-*.db
-*.sqlite
-*.sqlite3
-*.xlsx
-*.jsonl
-!templates/**/*.jsonl
-!packages/**/fixtures/**/*.jsonl
-profile.json
-knowledge.json
-answers.json
-resume*.pdf
-*.resume.pdf
-_scratch/
+# ── Environment / Secrets ─────────────────────────────────────────────────
+.env
+.env.local
+.env.production
+
+# ── PyInstaller ───────────────────────────────────────────────────────────
+build/
+src-tauri/binaries/
+
+# ── Test / Coverage artifacts ─────────────────────────────────────────────
+coverage/
+htmlcov/
+.coverage
+coverage.xml
+.pytest_cache/
+node_modules/.tmp/
+
+# ── Build artifacts ───────────────────────────────────────────────────────
+*.dmg
+*.exe
+*.AppImage
+*.msi
+*.deb
+*.rpm

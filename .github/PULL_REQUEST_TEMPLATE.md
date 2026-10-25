@@ -1,10 +1,13 @@
-## What and why
+## What
+<!-- What does this PR do? One sentence. -->
 
-<!-- Short description. Link the issue: Closes #123 -->
+## Why
+<!-- Why is this change needed? -->
+
+## Testing
+<!-- How did you verify this works? -->
 
 ## Checklist
-
-- [ ] `pnpm check` passes locally (lint, typecheck, tests, privacy scan, license check)
-- [ ] No personal data, credentials, cookies, sessions, or real resumes in code, fixtures, screenshots, or commit messages (use the fictional "Alex Example" persona and `example.com`)
-- [ ] New dependencies are MIT-compatible (see `scripts/license-check.mjs`)
-- [ ] User-facing changes keep the product rules (truthful answers, never blank, confirmation-email proof, outreach drafts never auto-sent)
+- [ ] `npx tsc --noEmit` passes (no type errors)
+- [ ] Tested in browser (`npm run dev`)
+- [ ] Backend still starts (`uv run python backend/main.py`)

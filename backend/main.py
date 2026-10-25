@@ -1096,17 +1096,27 @@ def _run_async_in_thread(coro_factory, status_dict):
     return t
 
 
+def _browser_profile_arg_key(path) -> str:
+    """Comparable form of a --user-data-dir value: absolute, case/separator-normalised, no quotes."""
+    return os.path.normcase(os.path.abspath(str(path).strip('"').rstrip("/\\")))
+
+
 def _kill_browser_processes():
-    """Kill any Chromium processes using the shared browser profile.
-    Uses psutil for cross-platform support (macOS, Linux, Windows)."""
+    """Kill Chromium processes using THIS instance's browser profile (<data dir>/browser_profile).
+    Uses psutil for cross-platform support (macOS, Linux, Windows).
+
+    M8: this used to match the substring "applyqueue/browser_profile" anywhere on the machine,
+    which never matched on Windows (backslashes) and killed the browser of any other ApplyQueue
+    instance with a different data dir (the cause of the "flaky under load" agent e2e tests)."""
     try:
         import psutil
-        target = "applyqueue/browser_profile"
+        target = _browser_profile_arg_key(get_data_dir() / "browser_profile")
         procs_to_kill = []
         for proc in psutil.process_iter(["pid", "name", "cmdline"]):
             try:
                 cmdline = proc.info.get("cmdline") or []
-                if any(target in arg for arg in cmdline):
+                if any(_browser_profile_arg_key(a.split("=", 1)[1]) == target
+                       for a in cmdline if a.startswith("--user-data-dir=")):
                     procs_to_kill.append(proc)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
@@ -1123,24 +1133,9 @@ def _kill_browser_processes():
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
     except ImportError:
-        import subprocess
-        try:
-            if sys.platform == "win32":
-                subprocess.run(
-                    ["taskkill", "/F", "/FI", "IMAGENAME eq chrome.exe"],
-                    timeout=5, capture_output=True,
-                )
-                subprocess.run(
-                    ["taskkill", "/F", "/FI", "IMAGENAME eq chromium.exe"],
-                    timeout=5, capture_output=True,
-                )
-            else:
-                subprocess.run(
-                    ["pkill", "-f", "user-data-dir=.*applyqueue/browser_profile"],
-                    timeout=3, capture_output=True,
-                )
-        except Exception:
-            pass
+        # psutil is bundled; never fall back to killing every chrome.exe (that would close
+        # the person's own browser).
+        _log.warning("psutil unavailable; not cleaning up browser processes")
 
 
 def _force_stop(status_dict):

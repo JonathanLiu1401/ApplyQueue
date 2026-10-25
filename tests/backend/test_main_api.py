@@ -1106,3 +1106,25 @@ def test_resume_location_rules(tmp_path, monkeypatch):
     assert not main._resume_location_ok((sibling / "cv.pdf").resolve())   # sibling prefix
     assert not main._resume_location_ok(Path("/etc/cv.pdf"))
     assert main._resume_roots is not None
+
+
+def test_browser_cleanup_only_kills_this_instances_profile(tmp_path, monkeypatch):
+    """M8: cleanup used to kill any process with "applyqueue/browser_profile" in its command
+    line (other instances' browsers) and never matched Windows paths."""
+    import subprocess
+    import sys
+    mine, other = tmp_path / "mine", tmp_path / "other"
+    monkeypatch.setattr(main, "get_data_dir", lambda: mine)
+    code = "import time; time.sleep(60)"
+    p_mine = subprocess.Popen([sys.executable, "-c", code, f"--user-data-dir={mine / 'browser_profile'}"])
+    p_other = subprocess.Popen([sys.executable, "-c", code, f"--user-data-dir={other / 'browser_profile'}"])
+    try:
+        import time
+        time.sleep(0.5)
+        main._kill_browser_processes()
+        assert p_mine.wait(10) is not None
+        assert p_other.poll() is None
+    finally:
+        for p in (p_mine, p_other):
+            p.kill()
+            p.wait()

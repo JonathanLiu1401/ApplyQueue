@@ -44,6 +44,13 @@ def env(tmp_path, monkeypatch):
         if mod is not None and hasattr(mod, "JOBS_FILE"):
             monkeypatch.setattr(mod, "JOBS_FILE", d / "data" / "jobs.json")
             monkeypatch.setattr(mod, "JOBS_LOCK", d / "data" / "jobs.json.lock")
+    # Own Chromium profile per test. The default profile is shared machine-wide, so a sidecar
+    # starting or stopping elsewhere (UI e2e, a dev instance) used to kill this test's browser
+    # ("WebSocket connection closed"), and a slow-exiting previous Chromium held its lock.
+    import apply_jobs as _aj
+    import core.shared_config as _sc
+    for mod in (_aj, _sc):
+        monkeypatch.setattr(mod, "BROWSER_PROFILE_DIR", d / "browser_profile", raising=False)
     ats, llm = MockATS(), ScriptedLLM()
     monkeypatch.setenv("APPLYQUEUE_E2E_ATS_PORTS", str(ats.port))   # the only way 127.0.0.1 is allowed
     import apply_jobs

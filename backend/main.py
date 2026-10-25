@@ -1,5 +1,5 @@
 """
-Python backend for LangHire desktop app.
+Python backend for the ApplyQueue desktop app.
 Runs as a local FastAPI server (sidecar process launched by Tauri).
 """
 import json
@@ -26,6 +26,7 @@ except ImportError:
 
 from core.config import get_data_dir, load_settings, save_settings, load_profile, save_profile
 from core.config import load_llm_settings, save_llm_settings
+from core import job_status as js
 
 # Project root for data files
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -70,7 +71,7 @@ async def lifespan(app: FastAPI):
     time.sleep(2)
     _kill_browser_processes()
 
-app = FastAPI(title="LangHire Backend", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="ApplyQueue Backend", version="1.0.0", lifespan=lifespan)
 
 # ── Auth token (generated per-session, written to data dir for frontend) ──
 import secrets as _secrets
@@ -210,20 +211,38 @@ def _start_parent_watchdog():
 
 
 def _recover_stale_jobs():
-    """Reset jobs stuck in 'in_progress' back to 'pending' (crash recovery)."""
+    """Crash recovery + status migration.
+
+    - Reset jobs stuck in 'in_progress' back to 'pending'.
+    - Migrate LangHire's unverified 'applied' rows to 'submitted_unconfirmed' (#89).
+    - Move a legacy shared ATS password out of settings.json into the vault.
+    """
     try:
         from core.shared_config import read_jobs, write_jobs
     except ImportError:
         from backend.core.shared_config import read_jobs, write_jobs
+    try:
+        from core.config import migrate_settings_secrets
+    except ImportError:
+        from backend.core.config import migrate_settings_secrets
+    try:
+        if migrate_settings_secrets():
+            _log.info("Moved the legacy shared ATS password from settings.json into the local vault")
+    except Exception as e:
+        _log.warning(f"Settings secret migration failed: {e}")
     jobs = read_jobs()
     recovered = 0
     for url, job in jobs.items():
         if job.get("status") == "in_progress":
             job["status"] = "pending"
             recovered += 1
-    if recovered:
+    migrated = js.migrate_jobs(jobs)
+    if recovered or migrated:
         write_jobs(jobs)
+    if recovered:
         _log.info(f"Recovered {recovered} stale in_progress jobs back to pending")
+    if migrated:
+        _log.info(f"Migrated {migrated} legacy 'applied' jobs to 'submitted_unconfirmed'")
 
 
 def _api_error(code: str, message: str, status_code: int = 400) -> JSONResponse:
@@ -695,7 +714,7 @@ def _kill_browser_processes():
     Uses psutil for cross-platform support (macOS, Linux, Windows)."""
     try:
         import psutil
-        target = "langhire/browser_profile"
+        target = "applyqueue/browser_profile"
         procs_to_kill = []
         for proc in psutil.process_iter(["pid", "name", "cmdline"]):
             try:
@@ -730,7 +749,7 @@ def _kill_browser_processes():
                 )
             else:
                 subprocess.run(
-                    ["pkill", "-f", "user-data-dir=.*langhire/browser_profile"],
+                    ["pkill", "-f", "user-data-dir=.*applyqueue/browser_profile"],
                     timeout=3, capture_output=True,
                 )
         except Exception:
@@ -934,7 +953,7 @@ async def start_applying(body: ApplyRequest):
             if not target:
                 print("Job not found.")
                 return
-            if target.get("status") not in ("pending", "failed"):
+            if target.get("status") not in js.RETRYABLE_STATUSES:
                 print(f"Job is already {target.get('status')}.")
                 return
             # Reset to pending so the worker can claim it
@@ -948,7 +967,7 @@ async def start_applying(body: ApplyRequest):
             pending = []
             for url in target_job_urls:
                 j = jobs.get(url)
-                if j and j.get("status") in ("pending", "failed"):
+                if j and j.get("status") in js.RETRYABLE_STATUSES:
                     _update_job(url, status="pending", error=None)
                     j["status"] = "pending"
                     pending.append(j)
@@ -967,10 +986,7 @@ async def start_applying(body: ApplyRequest):
             print("No pending jobs to apply to.")
             return
 
-        applied_labels = [
-            f"{j.get('title','')} at {j.get('company','')}"
-            for j in jobs.values() if j.get("status") == "applied"
-        ]
+        applied_labels = apply_jobs.submitted_labels(jobs)
 
         label = "All" if easy_apply_filter is None else ("Easy Apply" if easy_apply_filter else "Non-Easy Apply")
         print(f"Applying to {len(pending)} {label} jobs with {workers} worker(s)\n")
@@ -996,8 +1012,8 @@ async def start_applying(body: ApplyRequest):
         cred_task.cancel()
 
         print(f"\nResults: {stats}")
-        total_applied = sum(1 for j in load_json(JOBS_FILE, {}).values() if j.get("status") == "applied")
-        print(f"Total applied: {total_applied}")
+        total_submitted = sum(1 for j in load_json(JOBS_FILE, {}).values() if js.is_submitted(j.get("status")))
+        print(f"Total submitted (page-confirmed): {total_submitted}")
 
     def make_coro():
         return _do_apply()
@@ -1033,12 +1049,24 @@ async def get_jobs(
     search: Optional[str] = Query(None),
     limit: int = Query(500),
 ):
-    """Get all jobs, optionally filtered by status and search."""
+    """Get all jobs, optionally filtered by status and search.
+
+    ``status`` may be a comma-separated list; ``submitted`` (or legacy ``applied``)
+    selects every submitted status (submitted_unconfirmed + confirmed).
+    """
     jobs = _load_jobs()
+    wanted: set[str] = set()
+    if status:
+        for s_ in status.split(","):
+            s_ = s_.strip()
+            if s_ in ("submitted", js.LEGACY_APPLIED):
+                wanted.update(js.SUBMITTED_STATUSES)
+            elif s_:
+                wanted.add(s_)
     result = []
     for url, job in jobs.items():
         job["url"] = url
-        if status and job.get("status") != status:
+        if wanted and js.normalize_status(job.get("status")) not in wanted:
             continue
         if search:
             q = search.lower()
@@ -1053,12 +1081,16 @@ async def get_jobs(
 
 @app.get("/jobs/stats")
 async def get_job_stats():
+    """Counts per status. ``applied`` is kept for older clients and equals the
+    number of submissions (submitted_unconfirmed + confirmed)."""
     jobs = _load_jobs()
-    stats = {"total": len(jobs), "pending": 0, "applied": 0, "failed": 0, "blocked": 0, "in_progress": 0}
+    stats = {"total": len(jobs), **{s_: 0 for s_ in js.ALL_STATUSES}}
     for j in jobs.values():
-        s = j.get("status", "pending")
-        if s in stats:
-            stats[s] += 1
+        s_ = js.normalize_status(j.get("status"))
+        if s_ in stats:
+            stats[s_] += 1
+    stats["submitted"] = sum(stats[s_] for s_ in js.SUBMITTED_STATUSES)
+    stats["applied"] = stats["submitted"]
     return stats
 
 
@@ -1071,20 +1103,21 @@ async def export_jobs_csv():
 
     jobs = _load_jobs()
     rows = list(jobs.values())
-    # Newest first by applied_at, then collected_at — matches the History view ordering.
-    rows.sort(key=lambda j: (j.get("applied_at") or "", j.get("collected_at") or ""), reverse=True)
+    # Newest first by submission date, then collected_at — matches the History view ordering.
+    rows.sort(key=lambda j: (j.get("submitted_at") or j.get("applied_at") or "", j.get("collected_at") or ""),
+              reverse=True)
 
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["Date Applied", "Date Collected", "Job Title", "Company", "Location", "Status", "Source", "Easy Apply", "URL"])
+    writer.writerow(["Date Submitted", "Date Collected", "Job Title", "Company", "Location", "Status", "Source", "Easy Apply", "URL"])
     for j in rows:
         writer.writerow([
-            j.get("applied_at", "") or "",
+            j.get("submitted_at") or j.get("applied_at") or "",
             j.get("collected_at", "") or "",
             j.get("title", "") or "",
             j.get("company", "") or "",
             j.get("location", "") or "",
-            j.get("status", "") or "",
+            js.normalize_status(j.get("status")) if j.get("status") else "",
             j.get("source", "") or "",
             "" if j.get("easy_apply") is None else ("yes" if j.get("easy_apply") else "no"),
             j.get("url", "") or "",
@@ -1093,7 +1126,7 @@ async def export_jobs_csv():
     return StreamingResponse(
         iter([buf.getvalue()]),
         media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="langhire-jobs.csv"'},
+        headers={"Content-Disposition": 'attachment; filename="applyqueue-jobs.csv"'},
     )
 
 
@@ -1106,7 +1139,9 @@ async def update_job_status(body: dict):
     new_status = body.get("status", "").strip()
     if not url:
         return _api_error("missing_field", "Job URL is required", 400)
-    valid_statuses = ("pending", "applied", "failed", "blocked")
+    if new_status == js.LEGACY_APPLIED:  # older clients
+        new_status = js.SUBMITTED_UNCONFIRMED
+    valid_statuses = js.MANUAL_STATUSES
     if new_status not in valid_statuses:
         return _api_error("invalid_status", f"Status must be one of: {', '.join(valid_statuses)}", 400)
 
@@ -1114,9 +1149,48 @@ async def update_job_status(body: dict):
     if url not in jobs:
         return _api_error("not_found", "Job not found", 404)
 
+    from datetime import timezone as _tz
     from core.shared_config import update_job
-    update_job(url, status=new_status, error=None)
+    fields = {"status": new_status, "error": None, "status_set_manually": True}
+    if new_status in js.SUBMITTED_STATUSES and not (jobs[url].get("submitted_at") or jobs[url].get("applied_at")):
+        fields["submitted_at"] = datetime.now(_tz.utc).isoformat()
+    update_job(url, **fields)
     return {"success": True, "url": url, "status": new_status}
+
+
+@app.post("/jobs/confirm-email")
+async def confirm_job_by_email(body: dict):
+    """Upgrade submitted_unconfirmed -> confirmed once a confirmation email is matched.
+
+    Hook for M4 email linking; requires a page-confirmed (or legacy) submission.
+    ``evidence`` should identify the email (e.g. message id, sender domain, received_at),
+    never its full body.
+    """
+    url = (body.get("url") or "").strip()
+    evidence = body.get("evidence") or {}
+    if not url or not isinstance(evidence, dict) or not evidence:
+        return _api_error("missing_field", "url and evidence are required", 400)
+    jobs = _load_jobs()
+    job = jobs.get(url)
+    if not job:
+        return _api_error("not_found", "Job not found", 404)
+    if not js.can_confirm_by_email(job):
+        return _api_error("not_submitted", "Only a page-confirmed submission can be confirmed by email", 409)
+    from core.shared_config import update_job
+    allowed = {k: str(v)[:300] for k, v in evidence.items() if k in ("message_id", "from_domain", "subject", "received_at")}
+    update_job(url, **js.confirmation_fields(allowed))
+    return {"success": True, "url": url, "status": js.CONFIRMED}
+
+
+@app.get("/vault/sites")
+async def list_vault_sites():
+    """Sites with an ApplyQueue-generated password (hosts/usernames only, never passwords)."""
+    try:
+        from core.credential_vault import CredentialVault
+    except ImportError:
+        from backend.core.credential_vault import CredentialVault
+    vault = CredentialVault(get_data_dir() / "vault" / "site_credentials.json")
+    return {"sites": vault.list_sites(), "legacy_shared_password": vault.has_legacy_shared()}
 
 
 @app.post("/jobs/add")
@@ -1144,7 +1218,7 @@ async def add_job_manually(body: dict):
         "status": "pending",
         "source": body.get("source", "manual"),
         "collected_at": datetime.now(timezone.utc).isoformat(),
-        "applied_at": None,
+        "submitted_at": None,
         "error": None,
     }
     write_jobs(jobs)

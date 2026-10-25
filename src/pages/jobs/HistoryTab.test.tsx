@@ -84,8 +84,8 @@ describe("HistoryTab", () => {
     onJobsChanged = vi.fn();
     mockGetApplyStatus.mockResolvedValue(structuredClone(idleApply) as never);
     mockGetJobs.mockImplementation(async (params?: { status?: string }) => {
-      if (params?.status === "applied") return [structuredClone(appliedJob)] as never;
-      if (params?.status === "failed") return [structuredClone(failedJob)] as never;
+      if (params?.status === "submitted") return [structuredClone(appliedJob)] as never;
+      if (params?.status === "needs_human,failed") return [structuredClone(failedJob)] as never;
       return [] as never;
     });
     mockGetMetricRuns.mockResolvedValue([structuredClone(metric)] as never);

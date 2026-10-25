@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
+import { useSafeTimeout } from "../hooks/useSafeTimeout";
 import { Save, FolderOpen, X, Upload, Trash2, Sun, Moon, Monitor } from "lucide-react";
-import { getSettings, saveSettings, getPlugins, togglePlugin, removePlugin, importPlugin } from "../lib/api";
+import { getSettings, saveSettings, getPlugins, togglePlugin, removePlugin, importPlugin, getVaultSites } from "../lib/api";
 import { setTelemetryEnabled as setAnalyticsTelemetry } from "../lib/analytics";
 import { getStoredTheme, setTheme, type ThemeMode } from "../lib/theme";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -12,14 +13,15 @@ import { LANGUAGE_NAMES, getSavedLanguage, saveLanguagePreference } from "../i18
 import { loadLanguage } from "../i18n";
 
 export default function SettingsPage() {
+  const later = useSafeTimeout();
   const { t } = useTranslation("settings");
   const [resumePath, setResumePath] = useState("");
   const [blockedDomains, setBlockedDomains] = useState<string[]>([]);
   const [newDomain, setNewDomain] = useState("");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [vaultSiteCount, setVaultSiteCount] = useState<number | null>(null);
   const [maxFailures, setMaxFailures] = useState(8);
-  const [telemetryEnabled, setTelemetryEnabled] = useState(true);
+  const [telemetryEnabled, setTelemetryEnabled] = useState(false);
   const [theme, setThemeState] = useState<ThemeMode>(getStoredTheme());
   const [currentLanguage, setCurrentLanguage] = useState<string>(getSavedLanguage() || "");
   const [saved, setSaved] = useState(false);
@@ -39,17 +41,21 @@ export default function SettingsPage() {
         setResumePath(data.resume_path || "");
         setBlockedDomains(data.blocked_domains || []);
         setMaxFailures(data.max_failures || 8);
-        setTelemetryEnabled(data.telemetry_enabled !== false);
+        setTelemetryEnabled(data.telemetry_enabled === true);
         // Reconcile theme: a value saved on the backend wins over the local
         // default and is applied immediately.
         if (data.theme && data.theme !== getStoredTheme()) {
           setThemeState(data.theme);
           setTheme(data.theme);
         }
-        const sens = data.sensitive_data || { email: "", password: "" };
+        const sens = data.sensitive_data || { email: "" };
         setEmail(sens.email || "");
-        setPassword(sens.password || "");
       }),
+      // Optional: older backends have no vault endpoint.
+      Promise.resolve()
+        .then(() => getVaultSites())
+        .then((v) => setVaultSiteCount(v?.sites?.length ?? 0))
+        .catch(() => setVaultSiteCount(null)),
       getPlugins().then((res) => setPlugins(res.plugins || [])),
     ])
       .catch(() => {})
@@ -102,13 +108,13 @@ export default function SettingsPage() {
       await saveSettings({
         resume_path: resumePath,
         blocked_domains: blockedDomains,
-        sensitive_data: { email, password },
+        sensitive_data: { email },
         max_failures: maxFailures,
         telemetry_enabled: telemetryEnabled,
         theme,
       });
       setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      later(() => setSaved(false), 3000);
     } catch (e) {
       setSaveError("Failed to save settings. Please try again.");
       console.error("Failed to save settings:", e);
@@ -197,8 +203,9 @@ export default function SettingsPage() {
       {/* Sensitive Data */}
       <Section title="Account Credentials">
         <p className="text-[13px] text-muted-foreground mb-4">
-          Used for creating accounts on external ATS platforms during applications.
-          Stored locally in plaintext. Prefer using SSO (Sign in with LinkedIn/Google) when possible.
+          Email used to sign in to or create accounts on external ATS platforms. ApplyQueue generates a
+          unique strong password for each site and keeps it in a local vault on this computer; the AI agent
+          never sees it. Prefer SSO (Sign in with LinkedIn/Google) when possible.
         </p>
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -207,9 +214,12 @@ export default function SettingsPage() {
               className="input-base" />
           </div>
           <div>
-            <label className="block text-sm font-semibold text-foreground mb-1.5">Password</label>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-              className="input-base" />
+            <label className="block text-sm font-semibold text-foreground mb-1.5">Site passwords</label>
+            <p className="text-[13px] text-muted-foreground mt-2" data-testid="vault-site-count">
+              {vaultSiteCount === null
+                ? "Generated per site when an account is created."
+                : `${vaultSiteCount} site${vaultSiteCount === 1 ? "" : "s"} with a generated password.`}
+            </p>
           </div>
         </div>
       </Section>
@@ -235,8 +245,9 @@ export default function SettingsPage() {
           <div>
             <p className="text-sm font-semibold text-foreground">Usage Analytics</p>
             <p className="text-[13px] text-muted-foreground mt-1">
-              Help improve LangHire by sending anonymous usage data (feature usage, crash reports).
-              No personal information or job data is transmitted.
+              Off by default. If you opt in, anonymous usage events and crash reports are sent
+              (only in builds configured with an analytics endpoint). No personal information or job
+              data is transmitted. The browser automation library's own telemetry is always off.
             </p>
           </div>
           <label className="relative inline-flex items-center cursor-pointer flex-shrink-0 ml-4">

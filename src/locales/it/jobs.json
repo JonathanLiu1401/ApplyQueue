@@ -8,7 +8,10 @@
     "applied": "Candidato",
     "failed": "Non riuscita",
     "blocked": "Bloccata",
-    "inProgress": "In corso"
+    "inProgress": "In corso",
+    "submittedUnconfirmed": "Inviata (in attesa di email)",
+    "confirmed": "Confermata",
+    "needsHuman": "Richiede te"
   },
   "filter": {
     "all": "Tutte"

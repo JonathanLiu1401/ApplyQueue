@@ -8,7 +8,10 @@
     "applied": "आवेदित",
     "failed": "विफल",
     "blocked": "अवरुद्ध",
-    "inProgress": "प्रगति में"
+    "inProgress": "प्रगति में",
+    "submittedUnconfirmed": "सबमिट किया (ईमेल की प्रतीक्षा)",
+    "confirmed": "पुष्टि हुई",
+    "needsHuman": "आपकी ज़रूरत है"
   },
   "filter": {
     "all": "सभी"

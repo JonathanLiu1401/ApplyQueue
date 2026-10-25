@@ -18,7 +18,6 @@ from pathlib import Path
 if not getattr(sys, 'frozen', False):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from browser_use import Agent, BrowserSession
 
 try:
     import core.shared_config as config
@@ -33,6 +32,10 @@ try:
     from memory import extract_learnings_from_markers, extract_learnings_via_llm, store_learnings
     from memory.metrics import MetricsStore
     from core.agent_logger import on_step as _agent_on_step, on_done as _agent_on_done, log_run_start as _agent_log_start
+    from core import job_status as js
+    from core.apply_policy import apply_policy_text
+    from core.credential_vault import CredentialVault
+    from core.outcome import decide_outcome
 except ImportError:
     import backend.core.shared_config as config
     from backend.core.shared_config import (
@@ -46,6 +49,18 @@ except ImportError:
     from backend.memory import extract_learnings_from_markers, extract_learnings_via_llm, store_learnings
     from backend.memory.metrics import MetricsStore
     from backend.core.agent_logger import on_step as _agent_on_step, on_done as _agent_on_done, log_run_start as _agent_log_start
+    from backend.core import job_status as js
+    from backend.core.apply_policy import apply_policy_text
+    from backend.core.credential_vault import CredentialVault
+    from backend.core.outcome import decide_outcome
+
+# Imported after `core` so core/privacy_env.py has disabled browser-use telemetry first.
+from browser_use import Agent, BrowserSession  # noqa: E402
+
+try:  # noqa: E402 - needs browser_use, so imported after the privacy env is applied
+    from core.apply_tools import RunLedger, build_apply_tools, read_page_evidence
+except ImportError:
+    from backend.core.apply_tools import RunLedger, build_apply_tools, read_page_evidence
 
 # Lock for thread-safe QA file writes
 _qa_lock = asyncio.Lock()
@@ -74,15 +89,21 @@ def _friendly_error(raw: str) -> str:
     return raw
 
 
-async def save_job_status(url: str, status: str, error: str | None = None):
-    fields: dict = {"status": status}
-    if error:
-        fields["error"] = _friendly_error(error)
-    else:
-        fields["error"] = None
-    if status == "applied":
-        fields["applied_at"] = datetime.now(timezone.utc).isoformat()
+async def save_job_status(url: str, status: str, error: str | None = None, **extra):
+    """Persist a status. ``submitted_at`` is set only for page-evidenced submissions."""
+    fields: dict = {"status": status, **extra}
+    fields["error"] = _friendly_error(error) if error else None
+    if status in js.SUBMITTED_STATUSES:
+        fields.setdefault("submitted_at", datetime.now(timezone.utc).isoformat())
     update_job(url, **fields)
+
+
+def submitted_labels(jobs: dict) -> list[str]:
+    """'Title at Company' for every job already submitted (incl. legacy 'applied')."""
+    return [
+        f"{j.get('title','')} at {j.get('company','')}"
+        for j in jobs.values() if js.is_submitted(j.get("status"))
+    ]
 
 
 async def save_new_qa(new_questions: dict, source_domain: str = ""):
@@ -150,14 +171,26 @@ async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[
     except ImportError:
         pass
 
-    # Profile email is for application forms; credentials email/password are for ATS login
+    # Profile email is for application forms; account_email is for ATS logins.
+    # No password is ever given to the agent: fill_site_password types a
+    # per-site password from the local vault (core/credential_vault.py).
     agent_sensitive_data = {
         "email": profile.get("email", "").strip(),
         "account_email": SENSITIVE_DATA.get("email", "").strip(),
-        "password": SENSITIVE_DATA.get("password", ""),
     }
     if not agent_sensitive_data["email"]:
         agent_sensitive_data["email"] = agent_sensitive_data["account_email"]
+    vault = CredentialVault.default()
+    legacy_pw = (SENSITIVE_DATA.get("password") or "").strip()
+    if legacy_pw:  # LangHire's shared password: kept for signing in to existing accounts only
+        vault.import_legacy_shared(legacy_pw, agent_sensitive_data["account_email"])
+    ledger = RunLedger()
+    apply_tools = build_apply_tools(
+        ledger=ledger, profile=profile, qa=qa,
+        context={"source": "LinkedIn", "company": company, "title": title},
+        vault=vault, account_email=agent_sensitive_data["account_email"],
+        sensitive_data=agent_sensitive_data,
+    )
 
     login_preamble = (
         f"FIRST — LOGIN CHECK:\n"
@@ -183,28 +216,15 @@ async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[
         apply_instructions = (
             f"{login_preamble}"
             f"THEN: Go to {url} on LinkedIn. Click Easy Apply and complete the application. "
-            f"Use resume at {resume_path}. Auto-fill all fields from candidate profile."
+            f"Use resume at {resume_path}. Answer every question from the candidate profile (rules below). "
+            f"Use submit_form_guarded for the Next/Review/Submit buttons."
             f"{otp_instructions}"
         )
     else:
-        has_password = bool(agent_sensitive_data.get("password", "").strip())
-        password_note = ""
-        if not has_password:
-            password_note = (
-                "\n\nIMPORTANT: No password is configured in Settings. If the external site requires "
-                "account creation or login:\n"
-                "1. First check if you can apply as a guest (without creating an account)\n"
-                "2. Try 'Sign in with LinkedIn' or 'Sign in with Google' buttons\n"
-                "3. If no SSO option, CREATE A NEW ACCOUNT using <secret>account_email</secret> and a generated password "
-                "(create a strong password like 'JobApp2026!')\n"
-                "4. If account creation also fails, try 'Forgot password' → reset via email\n"
-                "5. If nothing works after 3 attempts, report failure and move to the next job\n"
-            )
-
         apply_instructions = (
             f"{login_preamble}"
             f"THEN: Go to {url} on LinkedIn. Click Apply and follow through to the external application page. "
-            f"Use resume at {resume_path}. Auto-fill all fields from candidate profile.\n\n"
+            f"Use resume at {resume_path}. Answer every question from the candidate profile (rules below).\n\n"
             f"NAVIGATING EXTERNAL SITES:\n"
             f"- The LinkedIn 'Apply' button often opens a company careers page, NOT the application form directly.\n"
             f"- You MUST explore the landing page: look for 'Apply Now', 'Submit Application', or similar buttons.\n"
@@ -215,8 +235,8 @@ async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[
             f"- NEVER give up just because the form isn't immediately visible — always explore the page first.\n\n"
             f"EMAIL USAGE:\n"
             f"- For APPLICATION FORM fields (contact email, email address, etc.): use <secret>email</secret>\n"
-            f"- For LOGGING IN or CREATING ACCOUNTS on external ATS sites: use <secret>account_email</secret> and <secret>password</secret>\n"
-            f"{password_note}"
+            f"- For LOGGING IN or CREATING ACCOUNTS on external ATS sites: use <secret>account_email</secret> "
+            f"and fill_site_password for password boxes (see ACCOUNTS below)\n"
             f"If it's a video funnel or recruitment pitch, report failure and stop. "
             f"If the external form is broken after 3 attempts, report failure and stop.\n\n"
             f"BLOCKED SITES — if redirected to any of these, immediately call done with success=false: {', '.join(BLOCKED_DOMAINS)}"
@@ -237,12 +257,10 @@ async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[
     agent = Agent(
         task=(
             f"{apply_instructions}\n\n"
+            f"{apply_policy_text()}\n"
             f"PERSISTENCE & EFFICIENCY:\n"
-            f"- Try at least 3 DIFFERENT approaches before reporting failure.\n"
-            f"- If an element doesn't respond after 2-3 clicks, try a completely different method (keyboard, scrolling, different selector).\n"
-            f"- Do NOT repeat the same failing action more than 3 times — switch strategies.\n"
-            f"- If you've been stuck on the same form field for more than 5 steps, skip it or call done with success=false.\n"
-            f"- You have a maximum of 70 steps total. Budget your steps wisely.\n\n"
+            f"- Do NOT repeat the same failing action more than 3 times — switch to the next retry strategy.\n"
+            f"- You have a maximum of {MAX_STEPS} steps total. Budget your steps wisely.\n\n"
             f"TRACKING: Include in memory field after submission:\n"
             f'@@JOB_APPLIED: {{"title": "{title}", "company": "{company}", "location": "{job.get("location", "")}"}}\n'
             f"For each form question: @@QUESTION: {{\"question\": \"...\", \"answer\": \"...\", \"type\": \"...\"}}"
@@ -255,6 +273,7 @@ async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[
         loop_detection_window=5,
         browser_session=browser,
         sensitive_data=agent_sensitive_data,
+        tools=apply_tools,
         extend_system_message=memory,
         available_file_paths=[resume_path],
         save_conversation_path=str(LOGS_DIR / f"apply_{company.replace(' ', '_')}_{title.replace(' ', '_')[:30]}"),
@@ -278,8 +297,21 @@ async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[
             pass
         await save_new_qa(new_questions, source_domain=domain)
 
-        # Determine success/failure
-        success = result.is_successful()
+        # Determine the outcome from our OWN page reading — never the agent's self-report (#89).
+        agent_claimed = bool(result.is_successful())
+        page_evidence = ledger.best_confirmation()
+        if page_evidence is None:
+            try:
+                final_page = await read_page_evidence(browser)
+                ledger.confirmations.append(final_page.to_dict())
+                page_evidence = final_page
+            except Exception as read_err:
+                print(f"    ⚠️  [W{worker_id}] Could not read final page: {read_err}")
+        outcome = decide_outcome(
+            page=page_evidence, agent_claimed_success=agent_claimed,
+            needs_human=ledger.needs_human, unanswered=ledger.unanswered_last,
+        )
+        success = outcome.status in js.SUBMITTED_STATUSES
 
         # ── Memory extraction (self-learning) ─────────────────────────────
         mem_store = get_memory_store()
@@ -332,15 +364,24 @@ async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[
         except Exception as metrics_err:
             print(f"    ⚠️  [W{worker_id}] Metrics recording failed (non-fatal): {metrics_err}")
 
+        evidence_fields = {
+            "page_confirmation": (outcome.evidence.get("page_confirmation") if success else None),
+            "needs_human_fields": ledger.needs_human,
+            "agent_claimed_success": agent_claimed,
+            "outcome_reason": outcome.reason,
+        }
         if success:
-            await save_job_status(url, "applied")
-            print(f"  ✅ [W{worker_id}] Applied: {title} at {company}")
-            return "applied"
+            await save_job_status(url, outcome.status, **evidence_fields)
+            print(f"  ✅ [W{worker_id}] Submitted (page-confirmed, awaiting email): {title} at {company}")
+        elif outcome.status == js.NEEDS_HUMAN:
+            await save_job_status(url, js.NEEDS_HUMAN, outcome.reason, **evidence_fields)
+            print(f"  🙋 [W{worker_id}] Needs a person: {title} at {company} — {outcome.reason[:100]}")
         else:
-            error_msg = result.errors()[-1] if result.errors() else "Agent reported failure"
-            await save_job_status(url, "failed", error_msg[:2000])
+            error_msg = result.errors()[-1] if result.errors() else None
+            error_msg = error_msg or ("Agent reported failure" if not agent_claimed else outcome.reason)
+            await save_job_status(url, js.FAILED, error_msg[:2000], **evidence_fields)
             print(f"  ❌ [W{worker_id}] Failed: {title} at {company} — {error_msg[:100]}")
-            return "failed"
+        return outcome.status
 
     except Exception as e:
         error_str = str(e)
@@ -408,10 +449,7 @@ async def main():
         print("No pending jobs to apply to. Run collect_jobs.py first.")
         return
 
-    applied_labels = [
-        f"{j.get('title','')} at {j.get('company','')}"
-        for j in jobs.values() if j.get("status") == "applied"
-    ]
+    applied_labels = submitted_labels(jobs)
 
     mode = "Easy Apply" if args.easy_apply else "Non-Easy Apply"
     print(f"Applying to {len(pending)} {mode} jobs with {args.workers} worker(s)\n")
@@ -438,8 +476,8 @@ async def main():
 
     print(f"\n{'='*60}")
     print(f"Results: {stats}")
-    total_applied = sum(1 for j in load_json(JOBS_FILE, {}).values() if j.get("status") == "applied")
-    print(f"Total applied across all runs: {total_applied}")
+    total_submitted = sum(1 for j in load_json(JOBS_FILE, {}).values() if js.is_submitted(j.get("status")))
+    print(f"Total submitted (page-confirmed) across all runs: {total_submitted}")
 
     # Memory stats
     mem_stats = get_memory_store().get_stats()

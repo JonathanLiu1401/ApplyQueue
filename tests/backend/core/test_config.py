@@ -24,10 +24,10 @@ def test_get_data_dir_creates_dir(data_dir):
 @pytest.mark.parametrize(
     "system, expected_parts",
     [
-        ("Darwin", ("Library", "Application Support", "langhire")),
-        ("Windows", ("AppData", "Roaming", "langhire")),
-        ("Linux", (".config", "langhire")),
-        ("FreeBSD", (".config", "langhire")),  # non-Darwin/Windows -> Linux branch
+        ("Darwin", ("Library", "Application Support", "applyqueue")),
+        ("Windows", ("AppData", "Roaming", "applyqueue")),
+        ("Linux", (".config", "applyqueue")),
+        ("FreeBSD", (".config", "applyqueue")),  # non-Darwin/Windows -> Linux branch
     ],
 )
 def test_get_data_dir_per_os(data_dir, monkeypatch, system, expected_parts):
@@ -147,7 +147,7 @@ def test_load_settings_defaults(data_dir):
     s = config.load_settings()
     assert s["max_failures"] == 8
     assert s["stagger_delay"] == 5
-    assert s["telemetry_enabled"] is True
+    assert s["telemetry_enabled"] is False  # opt-in (privacy default)
     assert s["data_dir"] == str(data_dir)
 
 

@@ -49,6 +49,13 @@ vi.mock("../lib/api", () => ({
   togglePlugin: vi.fn(),
   removePlugin: vi.fn(),
   importPlugin: vi.fn(),
+  getVaultSites: vi.fn(async () => ({
+    sites: [
+      { host: "boards.example.com", username: "alex@example.com", created_at: null, source: "generated" },
+      { host: "jobs.example.org", username: "alex@example.com", created_at: null, source: "generated" },
+    ],
+    legacy_shared_password: false,
+  })),
 }));
 
 const mockGetSettings = vi.mocked(getSettings);
@@ -63,6 +70,7 @@ const mockOpenDialog = vi.mocked(openDialog);
 const baseSettings = {
   resume_path: "/home/me/resume.pdf",
   blocked_domains: ["spam.com"],
+  // A legacy shared password from LangHire: must never be echoed back.
   sensitive_data: { email: "me@example.com", password: "secret" },
   max_failures: 8,
   data_dir: "/data",
@@ -121,7 +129,8 @@ describe("SettingsPage", () => {
     render(<SettingsPage />);
     expect(await screen.findByDisplayValue("/home/me/resume.pdf")).toBeInTheDocument();
     expect(screen.getByDisplayValue("me@example.com")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("secret")).toBeInTheDocument();
+    // The legacy shared password is never rendered; per-site passwords live in the vault.
+    expect(screen.queryByDisplayValue("secret")).toBeNull();
     expect(screen.getByDisplayValue(8)).toBeInTheDocument();
     // Blocked domain tag renders.
     expect(screen.getByText("spam.com")).toBeInTheDocument();
@@ -146,12 +155,16 @@ describe("SettingsPage", () => {
         expect.objectContaining({
           resume_path: "/home/me/resume.pdf",
           blocked_domains: ["spam.com"],
-          sensitive_data: { email: "me@example.com", password: "secret" },
+          sensitive_data: { email: "me@example.com" },
           max_failures: 8,
           telemetry_enabled: true,
         }),
       ),
     );
+    // No shared password field and no password is ever sent back.
+    expect(JSON.stringify(mockSaveSettings.mock.lastCall?.[0])).not.toContain("secret");
+    expect(screen.queryByDisplayValue("secret")).toBeNull();
+    expect(await screen.findByTestId("vault-site-count")).toHaveTextContent("2 sites with a generated password.");
     // Button text flips to "Saved".
     expect(await screen.findByText("Saved")).toBeInTheDocument();
   });

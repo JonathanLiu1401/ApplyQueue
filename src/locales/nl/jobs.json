@@ -8,7 +8,10 @@
     "applied": "Gesolliciteerd",
     "failed": "Mislukt",
     "blocked": "Geblokkeerd",
-    "inProgress": "Bezig"
+    "inProgress": "Bezig",
+    "submittedUnconfirmed": "Verzonden (wacht op e-mail)",
+    "confirmed": "Bevestigd",
+    "needsHuman": "Actie nodig"
   },
   "filter": {
     "all": "Alle"

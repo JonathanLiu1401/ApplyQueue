@@ -191,10 +191,16 @@ describe("PendingTab", () => {
     const menuButtons = screen.getAllByRole("button", { name: "Change status" });
     await user.click(menuButtons[0]);
 
-    const markApplied = await screen.findByRole("button", { name: "Mark as Applied" });
-    await user.click(markApplied);
+    // Manual statuses replace the old "applied" (#89): the user can record a
+    // submission or a confirmation they saw themselves; there is no "Applied".
+    expect(screen.queryByRole("button", { name: "Mark as Applied" })).toBeNull();
+    expect(
+      await screen.findByRole("button", { name: "Mark as status.submittedUnconfirmed" }),
+    ).toBeInTheDocument();
+    const markConfirmed = await screen.findByRole("button", { name: "Mark as status.confirmed" });
+    await user.click(markConfirmed);
     await waitFor(() =>
-      expect(mockUpdateJobStatus).toHaveBeenCalledWith(pendingJob.url, "applied"),
+      expect(mockUpdateJobStatus).toHaveBeenCalledWith(pendingJob.url, "confirmed"),
     );
     expect(onJobsChanged).toHaveBeenCalled();
   });
@@ -352,7 +358,7 @@ describe("PendingTab", () => {
     await user.click(titleCheckbox);
 
     await waitFor(() => {
-      const stored = JSON.parse(localStorage.getItem("langhire_tailor_options") || "{}");
+      const stored = JSON.parse(localStorage.getItem("applyqueue_tailor_options") || "{}");
       expect(stored.title).toBe(true);
     });
   });

@@ -3,6 +3,7 @@ import { Briefcase, CheckCircle, XCircle, TrendingUp, Building2, Globe } from "l
 import { getJobs, getMetricRuns } from "../lib/api";
 import { PageHeader, LoadingSpinner, EmptyState } from "../components/ui";
 import type { Job, RunMetric } from "../lib/types";
+import { isSubmitted, submittedDate } from "../lib/jobStatus";
 import { useTranslation } from "react-i18next";
 
 /** Count occurrences of a field across jobs, returning the top N as sorted pairs. */
@@ -20,7 +21,7 @@ function topCounts(items: string[], n: number): Array<[string, number]> {
 function dailyTrend(jobs: Job[], days: number): Array<{ day: string; count: number }> {
   const buckets = new Map<string, number>();
   for (const j of jobs) {
-    const ts = j.applied_at || j.collected_at;
+    const ts = submittedDate(j) || j.collected_at;
     if (!ts) continue;
     const day = ts.slice(0, 10); // YYYY-MM-DD
     buckets.set(day, (buckets.get(day) || 0) + 1);
@@ -83,7 +84,7 @@ export default function Analytics() {
 
   const metrics = useMemo(() => {
     const total = jobs.length;
-    const applied = jobs.filter((j) => j.status === "applied").length;
+    const applied = jobs.filter((j) => isSubmitted(j.status)).length;
     const failed = jobs.filter((j) => j.status === "failed").length;
     const attempts = applied + failed;
     const successRate = attempts > 0 ? Math.round((applied / attempts) * 100) : 0;
@@ -91,14 +92,15 @@ export default function Analytics() {
     const now = new Date();
     const weekAgo = new Date(now.getTime() - 7 * 24 * 3600 * 1000).toISOString();
     const monthAgo = new Date(now.getTime() - 30 * 24 * 3600 * 1000).toISOString();
-    const appliedThisWeek = jobs.filter((j) => (j.applied_at || "") >= weekAgo).length;
-    const appliedThisMonth = jobs.filter((j) => (j.applied_at || "") >= monthAgo).length;
+    const appliedThisWeek = jobs.filter((j) => isSubmitted(j.status) && submittedDate(j) >= weekAgo).length;
+    const appliedThisMonth = jobs.filter((j) => isSubmitted(j.status) && submittedDate(j) >= monthAgo).length;
 
     const bySource = topCounts(jobs.map((j) => j.source || "unknown"), 6);
     const byCompany = topCounts(jobs.map((j) => j.company), 6);
     const byStatus: Array<[string, number]> = [
       ["applied", applied],
       ["pending", jobs.filter((j) => j.status === "pending").length],
+      ["needs_human", jobs.filter((j) => j.status === "needs_human").length],
       ["failed", failed],
       ["blocked", jobs.filter((j) => j.status === "blocked").length],
     ];

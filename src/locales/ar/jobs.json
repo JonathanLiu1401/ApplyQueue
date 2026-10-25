@@ -8,7 +8,10 @@
     "applied": "تم التقديم",
     "failed": "فشل",
     "blocked": "محظور",
-    "inProgress": "قيد التنفيذ"
+    "inProgress": "قيد التنفيذ",
+    "submittedUnconfirmed": "تم الإرسال (بانتظار البريد)",
+    "confirmed": "مؤكَّد",
+    "needsHuman": "يحتاج إليك"
   },
   "filter": {
     "all": "الكل"

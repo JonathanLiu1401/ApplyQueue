@@ -26,6 +26,7 @@ import {
 import { trackEvent } from "../../lib/analytics";
 import LogLine from "../../components/LogLine";
 import { useTranslation } from "react-i18next";
+import { STATUS_FALLBACK_LABEL, STATUS_I18N_KEY, isSubmitted, normalizeStatus, submittedDate } from "../../lib/jobStatus";
 import type { Job, RunMetric, AppSettings } from "../../lib/types";
 
 interface AppliedJobRow {
@@ -63,8 +64,8 @@ export default function HistoryTab({ onJobsChanged }: HistoryTabProps) {
   async function loadAppliedJobs() {
     try {
       const [applied, failed, metrics, settings] = await Promise.all([
-        getJobs({ status: "applied" }),
-        getJobs({ status: "failed" }),
+        getJobs({ status: "submitted" }),
+        getJobs({ status: "needs_human,failed" }),
         getMetricRuns(200),
         getSettings(),
       ]);
@@ -90,10 +91,10 @@ export default function HistoryTab({ onJobsChanged }: HistoryTabProps) {
         metric: metricsByUrl.get(job.url),
       }));
 
-      // Sort by applied_at desc (newest first)
+      // Sort by submission date desc (newest first)
       rows.sort((a, b) => {
-        const dateA = a.job.applied_at || a.metric?.started_at || "";
-        const dateB = b.job.applied_at || b.metric?.started_at || "";
+        const dateA = submittedDate(a.job) || a.metric?.started_at || "";
+        const dateB = submittedDate(b.job) || b.metric?.started_at || "";
         return dateB.localeCompare(dateA);
       });
 
@@ -145,8 +146,8 @@ export default function HistoryTab({ onJobsChanged }: HistoryTabProps) {
   // Allow the global Cmd/Ctrl+E shortcut to trigger an export from this tab.
   useEffect(() => {
     const onExport = () => { void handleExport(); };
-    window.addEventListener("langhire:export", onExport);
-    return () => window.removeEventListener("langhire:export", onExport);
+    window.addEventListener("applyqueue:export", onExport);
+    return () => window.removeEventListener("applyqueue:export", onExport);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -158,7 +159,7 @@ export default function HistoryTab({ onJobsChanged }: HistoryTabProps) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "langhire-jobs.csv";
+      a.download = "applyqueue-jobs.csv";
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -255,7 +256,9 @@ export default function HistoryTab({ onJobsChanged }: HistoryTabProps) {
           <div className="divide-y divide-border rounded-xl border border-border overflow-hidden">
             {appliedJobs.map((row) => {
               const isExpanded = expandedUrl === row.job.url;
-              const isSuccess = row.job.status === "applied";
+              const isSuccess = isSubmitted(row.job.status);
+              const rowStatus = normalizeStatus(row.job.status);
+              const statusLabel = t(`jobs:${STATUS_I18N_KEY[rowStatus]}`, STATUS_FALLBACK_LABEL[rowStatus]);
 
               return (
                 <div key={row.job.url}>
@@ -295,12 +298,12 @@ export default function HistoryTab({ onJobsChanged }: HistoryTabProps) {
                           : "bg-red-50 text-red-700"
                       }`}
                     >
-                      {isSuccess ? "Applied" : "Failed"}
+                      {statusLabel}
                     </span>
 
                     {/* Date */}
                     <span className="text-[12px] text-muted-foreground flex-shrink-0 w-36 text-right">
-                      {formatDate(row.job.applied_at || row.metric?.started_at)}
+                      {formatDate(submittedDate(row.job) || row.metric?.started_at)}
                     </span>
 
                     {/* Duration */}
@@ -367,7 +370,7 @@ export default function HistoryTab({ onJobsChanged }: HistoryTabProps) {
                               </p>
                               <p className="text-sm text-foreground">
                                 {formatDate(
-                                  row.job.applied_at || row.metric?.started_at
+                                  submittedDate(row.job) || row.metric?.started_at
                                 )}
                                 {row.metric && (
                                   <span className="text-muted-foreground ml-2">

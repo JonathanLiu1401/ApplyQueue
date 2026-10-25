@@ -8,7 +8,10 @@
     "applied": "已申请",
     "failed": "失败",
     "blocked": "已阻止",
-    "inProgress": "进行中"
+    "inProgress": "进行中",
+    "submittedUnconfirmed": "已提交（等待邮件）",
+    "confirmed": "已确认",
+    "needsHuman": "需要你处理"
   },
   "filter": {
     "all": "全部"

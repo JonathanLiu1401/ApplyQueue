@@ -8,7 +8,10 @@
     "applied": "応募済み",
     "failed": "失敗",
     "blocked": "ブロック",
-    "inProgress": "進行中"
+    "inProgress": "進行中",
+    "submittedUnconfirmed": "送信済み（メール待ち）",
+    "confirmed": "確認済み",
+    "needsHuman": "要対応"
   },
   "filter": {
     "all": "すべて"

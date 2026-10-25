@@ -1,0 +1,47 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Example Corp - Apply</title></head>
+<body>
+<!-- Fictional ATS form for ApplyQueue tests. Mix of required and OPTIONAL questions. -->
+<form id="apply" onsubmit="event.preventDefault(); document.body.innerHTML = '<h1>Thank you for applying to Example Corp!</h1>'; history.pushState({}, '', '#thank-you');">
+  <div class="field"><label for="fn">First name *</label><input id="fn" name="first_name" required></div>
+  <div class="field"><label for="ln">Last name *</label><input id="ln" name="last_name" required></div>
+  <div class="field"><label for="em">Email *</label><input id="em" name="email" type="email" required></div>
+  <div class="field"><label for="ph">Phone</label><input id="ph" name="phone"></div>
+  <div class="field"><label for="li">LinkedIn profile (optional)</label><input id="li" name="linkedin"></div>
+  <div class="field"><label for="cv">Resume/CV *</label><input id="cv" name="resume" type="file" required></div>
+  <div class="field"><label for="cl">Cover letter (optional)</label><textarea id="cl" name="cover_letter"></textarea></div>
+  <div class="field"><label for="why">Why do you want to work at Example Corp? (optional)</label><textarea id="why" name="why_us"></textarea></div>
+  <div class="field"><label for="extra">Additional information (optional)</label><textarea id="extra" name="extra"></textarea></div>
+  <div class="field"><label for="src">How did you hear about us?</label>
+    <select id="src" name="source"><option value="">Select...</option><option>LinkedIn</option><option>Referral</option><option>Company website</option></select></div>
+  <div class="field"><label for="yoe">Years of experience (optional)</label><input id="yoe" name="yoe" class="stubborn"></div>
+  <fieldset><legend>Will you now or in the future require visa sponsorship?</legend>
+    <label><input type="radio" name="sponsor" value="yes"> Yes</label>
+    <label><input type="radio" name="sponsor" value="no"> No</label></fieldset>
+  <fieldset><legend>Which work arrangements would you consider? (optional)</legend>
+    <label><input type="checkbox" name="arrangement" value="remote"> Remote</label>
+    <label><input type="checkbox" name="arrangement" value="hybrid"> Hybrid</label>
+    <label><input type="checkbox" name="arrangement" value="onsite"> On-site</label></fieldset>
+  <h3>Voluntary Self-Identification (optional)</h3>
+  <div class="field"><label for="gender">Gender</label>
+    <select id="gender" name="gender"><option value="">Select...</option><option>Female</option><option>Male</option><option>Non-binary</option><option>I decline to self-identify</option></select></div>
+  <fieldset><legend>Veteran status</legend>
+    <label><input type="radio" name="veteran" value="v"> I am a protected veteran</label>
+    <label><input type="radio" name="veteran" value="n"> I am not a protected veteran</label>
+    <label><input type="radio" name="veteran" value="d"> I don't wish to answer</label></fieldset>
+  <div class="field" id="clearance-wrap" hidden><label for="clr">Active security clearance ID *</label><input id="clr" name="clearance" required></div>
+  <div class="field"><label><input type="checkbox" name="certify" required> I certify the information above is true *</label></div>
+  <button type="submit" id="submit">Submit application</button>
+</form>
+<script>
+  // A "stubborn" input (common in React ATSs): a plain value set followed by
+  // change is wiped unless real key events were seen first.
+  const yoe = document.getElementById('yoe');
+  let keyed = false;
+  yoe.addEventListener('keydown', () => { keyed = true; });
+  yoe.addEventListener('change', () => { if (!keyed) yoe.value = ''; });
+  // The clearance question only exists on the ?clearance=1 variant (a fact Alex does not have).
+  const clr = document.getElementById('clearance-wrap');
+  if (location.search.includes('clearance=1')) clr.hidden = false; else clr.remove();
+</script>
+</body></html>

@@ -44,7 +44,8 @@ ADA_CMD: tuple[str, ...] = ()  # Only needed for Amazon internal credential refr
 # Load settings from OS data dir (written by desktop app UI) if available
 _settings_file = DATA_DIR / "settings.json"
 _ui_settings = json.loads(_settings_file.read_text()) if _settings_file.exists() else {}
-SENSITIVE_DATA = _ui_settings.get("sensitive_data", {"email": "", "password": ""})
+# A legacy shared "password" here is moved to the vault at startup (sign-in only).
+SENSITIVE_DATA = _ui_settings.get("sensitive_data", {"email": ""})
 
 # Fall back to profile email if sensitive_data email is blank
 if not SENSITIVE_DATA.get("email", "").strip():

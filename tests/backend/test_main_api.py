@@ -1,5 +1,5 @@
 """
-Industry-grade API / integration tests for the LangHire FastAPI backend.
+Industry-grade API / integration tests for the ApplyQueue FastAPI backend.
 
 These exercise ``backend/main.py`` in-process with FastAPI's ``TestClient``
 (no real HTTP server, no subprocess, no browser, no network). Heavy
@@ -341,7 +341,7 @@ class TestJobs:
         assert resp.status_code == 200
         assert "text/csv" in resp.headers["content-type"]
         assert "attachment" in resp.headers["content-disposition"]
-        assert "langhire-jobs.csv" in resp.headers["content-disposition"]
+        assert "applyqueue-jobs.csv" in resp.headers["content-disposition"]
         lines = [ln for ln in resp.text.splitlines() if ln.strip()]
         assert len(lines) == 1  # header only
         assert "Job Title" in lines[0]
@@ -392,10 +392,12 @@ class TestJobs:
     def test_update_status_success(self, auth_client):
         url = "https://www.linkedin.com/jobs/view/999"
         auth_client.post("/jobs/add", json={"url": url})
+        # Older clients still send "applied"; it is stored as submitted_unconfirmed (#89).
         resp = auth_client.put("/jobs/status", json={"url": url, "status": "applied"})
         assert resp.status_code == 200
-        assert resp.json()["status"] == "applied"
-        assert auth_client.get("/jobs/stats").json()["applied"] == 1
+        assert resp.json()["status"] == "submitted_unconfirmed"
+        stats = auth_client.get("/jobs/stats").json()
+        assert stats["submitted_unconfirmed"] == 1 and stats["submitted"] == 1 and stats["applied"] == 1
 
     def test_delete_jobs(self, auth_client):
         url = "https://www.linkedin.com/jobs/view/555"
@@ -686,3 +688,89 @@ class TestNotFound:
         body = resp.json()
         assert body["success"] is False
         assert body["models"] == []
+
+
+# ── #89: submission statuses, email confirmation hook, site vault ───────────
+def _seed(auth_client, url, **fields):
+    from core.shared_config import update_job
+
+    assert auth_client.post("/jobs/add", json={"url": url}).status_code == 200
+    if fields:
+        update_job(url, **fields)
+
+
+class TestSubmissionStatuses:
+    def test_manual_status_rejects_unknown(self, auth_client):
+        url = "https://boards.example.com/jobs/1"
+        _seed(auth_client, url)
+        resp = auth_client.put("/jobs/status", json={"url": url, "status": "in_progress"})
+        assert resp.status_code == 400
+
+    def test_manual_confirmed_sets_timestamps(self, auth_client):
+        url = "https://boards.example.com/jobs/2"
+        _seed(auth_client, url)
+        assert auth_client.put("/jobs/status", json={"url": url, "status": "confirmed"}).status_code == 200
+        job = next(j for j in auth_client.get("/jobs").json() if j["url"] == url)
+        assert job["status"] == "confirmed" and job["status_set_manually"] is True
+        assert job.get("submitted_at")
+
+    def test_stats_and_filters_cover_every_status(self, auth_client):
+        _seed(auth_client, "https://boards.example.com/a", status="submitted_unconfirmed",
+              page_confirmation={"matched": "url"})
+        _seed(auth_client, "https://boards.example.com/b", status="confirmed")
+        _seed(auth_client, "https://boards.example.com/c", status="needs_human",
+              needs_human_fields=[{"field": "Why us?", "reason": "no answer"}])
+        _seed(auth_client, "https://boards.example.com/d", status="failed")
+        stats = auth_client.get("/jobs/stats").json()
+        assert stats["submitted_unconfirmed"] == 1 and stats["confirmed"] == 1
+        assert stats["needs_human"] == 1 and stats["failed"] == 1 and stats["submitted"] == 2
+        submitted = {j["url"] for j in auth_client.get("/jobs", params={"status": "submitted"}).json()}
+        assert submitted == {"https://boards.example.com/a", "https://boards.example.com/b"}
+        attention = {j["url"] for j in auth_client.get("/jobs", params={"status": "needs_human,failed"}).json()}
+        assert attention == {"https://boards.example.com/c", "https://boards.example.com/d"}
+
+    def test_confirm_email_requires_page_confirmation(self, auth_client):
+        url = "https://boards.example.com/jobs/3"
+        _seed(auth_client, url, status="submitted_unconfirmed")  # no page evidence
+        resp = auth_client.post("/jobs/confirm-email", json={"url": url, "evidence": {"message_id": "m1"}})
+        assert resp.status_code == 409
+
+    def test_confirm_email_upgrades_and_strips_body(self, auth_client):
+        url = "https://boards.example.com/jobs/4"
+        _seed(auth_client, url, status="submitted_unconfirmed", page_confirmation={"matched": "text"})
+        resp = auth_client.post("/jobs/confirm-email", json={
+            "url": url,
+            "evidence": {"message_id": "m2", "from_domain": "example.com", "body": "full email text"},
+        })
+        assert resp.status_code == 200 and resp.json()["status"] == "confirmed"
+        job = next(j for j in auth_client.get("/jobs").json() if j["url"] == url)
+        assert job["status"] == "confirmed" and job["confirmed_at"]
+        assert job["email_confirmation"] == {"message_id": "m2", "from_domain": "example.com"}
+
+    def test_confirm_email_validation(self, auth_client):
+        assert auth_client.post("/jobs/confirm-email", json={"url": ""}).status_code == 400
+        resp = auth_client.post("/jobs/confirm-email",
+                                json={"url": "https://boards.example.com/none", "evidence": {"message_id": "x"}})
+        assert resp.status_code == 404
+
+
+class TestVaultSites:
+    def test_lists_hosts_without_passwords(self, auth_client, data_dir):
+        from core.config import get_data_dir
+        from core.credential_vault import CredentialVault
+
+        vault = CredentialVault(get_data_dir() / "vault" / "site_credentials.json")
+        entry, created = vault.get_or_create("www.Example.com", "alex@example.com")
+        assert created
+        body = auth_client.get("/vault/sites").json()
+        assert body["legacy_shared_password"] is False
+        assert [s["host"] for s in body["sites"]] == ["example.com"]
+        assert entry["password"] not in str(body)
+
+    def test_settings_never_return_or_store_password(self, auth_client, data_dir):
+        settings = auth_client.get("/settings").json()
+        settings["sensitive_data"] = {"email": "alex@example.com", "password": "LegacyShared1!"}
+        assert auth_client.put("/settings", json=settings).status_code == 200
+        again = auth_client.get("/settings").json()
+        assert "password" not in again.get("sensitive_data", {})
+        assert auth_client.get("/vault/sites").json()["legacy_shared_password"] is True

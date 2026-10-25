@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSafeTimeout } from "../../hooks/useSafeTimeout";
 import {
   Briefcase,
   Search,
@@ -21,6 +22,7 @@ import {
   ChevronRight,
   Sparkles,
   Send,
+  AlertTriangle,
 } from "lucide-react";
 import {
   getJobs,
@@ -37,12 +39,22 @@ import {
 } from "../../lib/api";
 import { markStart, measureAndTrack } from "../../lib/perf";
 import type { Job, JobStatus, JobStats, TailorOptions } from "../../lib/types";
+import {
+  MANUAL_STATUSES,
+  STATUS_FALLBACK_LABEL,
+  STATUS_I18N_KEY,
+  isSubmitted,
+  normalizeStatus,
+  submittedDate,
+} from "../../lib/jobStatus";
 import AutomationDialog from "../../components/AutomationDialog";
 import { useTranslation } from "react-i18next";
 
 const STATUS_ICONS: Record<JobStatus, typeof CheckCircle> = {
   pending: Clock,
-  applied: CheckCircle,
+  submitted_unconfirmed: CheckCircle,
+  confirmed: CheckCircle,
+  needs_human: AlertTriangle,
   failed: XCircle,
   blocked: Ban,
   in_progress: Loader2,
@@ -50,7 +62,9 @@ const STATUS_ICONS: Record<JobStatus, typeof CheckCircle> = {
 
 const STATUS_STYLES: Record<JobStatus, { color: string; bg: string }> = {
   pending: { color: "text-amber-700", bg: "bg-amber-50" },
-  applied: { color: "text-success", bg: "bg-[#F0FFF0]" },
+  submitted_unconfirmed: { color: "text-success", bg: "bg-[#F0FFF0]" },
+  confirmed: { color: "text-success", bg: "bg-[#E6FFE6]" },
+  needs_human: { color: "text-amber-800", bg: "bg-amber-100" },
   failed: { color: "text-destructive", bg: "bg-[#FFF0F0]" },
   blocked: { color: "text-muted-foreground", bg: "bg-[#F7F7F7]" },
   in_progress: { color: "text-primary", bg: "bg-[#FFF0F3]" },
@@ -63,7 +77,7 @@ interface PendingTabProps {
 
 function loadTailorOptions(): TailorOptions {
   try {
-    const stored = localStorage.getItem("langhire_tailor_options");
+    const stored = localStorage.getItem("applyqueue_tailor_options");
     if (stored) return JSON.parse(stored);
   } catch {
     /* ignore */
@@ -72,22 +86,23 @@ function loadTailorOptions(): TailorOptions {
 }
 
 function saveTailorOptions(options: TailorOptions) {
-  localStorage.setItem("langhire_tailor_options", JSON.stringify(options));
+  localStorage.setItem("applyqueue_tailor_options", JSON.stringify(options));
 }
 
 function loadAutoTailor(): boolean {
   try {
-    return localStorage.getItem("langhire_auto_tailor") === "true";
+    return localStorage.getItem("applyqueue_auto_tailor") === "true";
   } catch {
     return false;
   }
 }
 
 function saveAutoTailor(value: boolean) {
-  localStorage.setItem("langhire_auto_tailor", value ? "true" : "false");
+  localStorage.setItem("applyqueue_auto_tailor", value ? "true" : "false");
 }
 
 export default function PendingTab({ onJobsChanged, stats }: PendingTabProps) {
+  const later = useSafeTimeout();
   const { t } = useTranslation("jobs");
 
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -129,13 +144,12 @@ export default function PendingTab({ onJobsChanged, stats }: PendingTabProps) {
   const [refining, setRefining] = useState<Record<string, boolean>>({});
   const [contentLoading, setContentLoading] = useState<Record<string, boolean>>({});
 
-  const STATUS_LABELS: Record<JobStatus, string> = {
-    pending: t("status.pending"),
-    applied: t("status.applied"),
-    failed: t("status.failed"),
-    blocked: t("status.blocked"),
-    in_progress: t("status.inProgress"),
-  };
+  const STATUS_LABELS = Object.fromEntries(
+    (Object.keys(STATUS_I18N_KEY) as JobStatus[]).map((s) => [
+      s,
+      t(STATUS_I18N_KEY[s], STATUS_FALLBACK_LABEL[s]),
+    ]),
+  ) as Record<JobStatus, string>;
 
   const fetchJobs = (isBackgroundRefresh = false) => {
     if (!isBackgroundRefresh) {
@@ -143,17 +157,17 @@ export default function PendingTab({ onJobsChanged, stats }: PendingTabProps) {
       markStart("jobs_page_load");
     }
     const params: Record<string, string | number> = {};
-    // For the pending tab, exclude "applied" unless explicitly filtered
+    // For the pending tab, exclude submitted jobs unless explicitly filtered
     if (statusFilter) {
       params.status = statusFilter;
     }
     if (searchQuery) params.search = searchQuery;
     getJobs(params as { status?: string; search?: string })
       .then((jobsData) => {
-        // Filter out applied jobs from this tab (they show in History)
+        // Filter out submitted jobs from this tab (they show in History)
         const filtered = statusFilter
           ? jobsData || []
-          : (jobsData || []).filter((j: Job) => j.status !== "applied");
+          : (jobsData || []).filter((j: Job) => !isSubmitted(j.status));
         setJobs(filtered);
       })
       .catch(() => {})
@@ -303,7 +317,7 @@ export default function PendingTab({ onJobsChanged, stats }: PendingTabProps) {
       const profile = await getProfile();
       await saveProfile({ ...profile, cover_letter: generatedLetter });
       setLetterSaved(true);
-      setTimeout(() => setLetterSaved(false), 3000);
+      later(() => setLetterSaved(false), 3000);
     } catch {
       setGenerateError(t("coverLetterModal.failedSave"));
     }
@@ -534,6 +548,11 @@ export default function PendingTab({ onJobsChanged, stats }: PendingTabProps) {
         {[
           { value: "", label: t("filter.all"), count: stats.total - (stats.applied || 0) },
           { value: "pending", label: t("status.pending"), count: stats.pending },
+          {
+            value: "needs_human",
+            label: t("status.needsHuman", STATUS_FALLBACK_LABEL.needs_human),
+            count: stats.needs_human ?? 0,
+          },
           { value: "failed", label: t("status.failed"), count: stats.failed },
           { value: "blocked", label: t("status.blocked"), count: stats.blocked },
         ].map(({ value, label, count }) => (
@@ -605,8 +624,9 @@ export default function PendingTab({ onJobsChanged, stats }: PendingTabProps) {
       ) : (
         <div className="bg-card rounded-2xl border border-border shadow-sm divide-y divide-border">
           {jobs.map((job) => {
-            const icon = STATUS_ICONS[job.status] || STATUS_ICONS.pending;
-            const styles = STATUS_STYLES[job.status] || STATUS_STYLES.pending;
+            const status = normalizeStatus(job.status);
+            const icon = STATUS_ICONS[status] || STATUS_ICONS.pending;
+            const styles = STATUS_STYLES[status] || STATUS_STYLES.pending;
             const StatusIcon = icon;
             const isSelectable = job.status === "pending" || job.status === "failed";
             const hasTailoredResume = !!job.tailored_resume_path;
@@ -659,9 +679,9 @@ export default function PendingTab({ onJobsChanged, stats }: PendingTabProps) {
                             {t("jobItem.collected", {
                               date: new Date(job.collected_at).toLocaleDateString(),
                             })}
-                            {job.applied_at &&
+                            {submittedDate(job) &&
                               t("jobItem.applied", {
-                                date: new Date(job.applied_at).toLocaleDateString(),
+                                date: new Date(submittedDate(job)).toLocaleDateString(),
                               })}
                           </p>
                         )}
@@ -686,7 +706,7 @@ export default function PendingTab({ onJobsChanged, stats }: PendingTabProps) {
                         className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold ${styles.bg} ${styles.color}`}
                       >
                         <StatusIcon className="w-3 h-3" />{" "}
-                        {STATUS_LABELS[job.status] || STATUS_LABELS.pending}
+                        {STATUS_LABELS[status] || STATUS_LABELS.pending}
                       </span>
                       {(job.status === "pending" || job.status === "failed") && (
                         <>
@@ -741,16 +761,14 @@ export default function PendingTab({ onJobsChanged, stats }: PendingTabProps) {
                             className="absolute right-0 top-8 z-50 bg-card border border-border rounded-lg shadow-lg py-1 min-w-[160px]"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            {(
-                              ["pending", "applied", "failed", "blocked"] as const
-                            ).map((s) => (
+                            {MANUAL_STATUSES.map((s) => (
                               <button
                                 key={s}
                                 onClick={() => handleStatusChange(job.url, s)}
-                                disabled={job.status === s}
+                                disabled={status === s}
                                 className="w-full text-left px-3 py-1.5 text-sm hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                               >
-                                Mark as {s.charAt(0).toUpperCase() + s.slice(1)}
+                                Mark as {STATUS_LABELS[s]}
                               </button>
                             ))}
                           </div>

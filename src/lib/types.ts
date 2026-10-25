@@ -93,7 +93,8 @@ export interface AppSettings {
   blocked_domains: string[];
   sensitive_data: {
     email: string;
-    password: string;
+    /** Legacy only: moved to the per-site vault by the backend, never sent by the UI. */
+    password?: string;
   };
   max_failures: number;
   stagger_delay: number;
@@ -109,11 +110,19 @@ export interface Job {
   company: string;
   location: string;
   easy_apply: boolean | null;
-  status: "pending" | "in_progress" | "applied" | "failed" | "blocked";
+  /** "applied" only appears on legacy rows not yet migrated by the backend. */
+  status: JobStatus | "applied";
   source?: string;
   search_title?: string;
   collected_at?: string;
-  applied_at?: string;
+  /** Set when ApplyQueue read a submission confirmation from the page. */
+  submitted_at?: string | null;
+  /** Legacy LangHire field (agent self-report); kept for old rows. */
+  applied_at?: string | null;
+  confirmed_at?: string | null;
+  page_confirmation?: { confirmed: boolean; matched: string; url: string; source: string } | null;
+  needs_human_fields?: { field_label: string; reason: string }[];
+  outcome_reason?: string;
   error?: string;
   description?: string;
   tailored_resume_path?: string;
@@ -276,12 +285,24 @@ export interface ApplyStatus {
   finished_at: string | null;
 }
 
-export type JobStatus = "pending" | "in_progress" | "applied" | "failed" | "blocked";
+export type JobStatus =
+  | "pending"
+  | "in_progress"
+  | "submitted_unconfirmed"
+  | "confirmed"
+  | "needs_human"
+  | "failed"
+  | "blocked";
 
 export interface JobStats {
   total: number;
   pending: number;
+  /** submitted_unconfirmed + confirmed (kept as "applied" for older clients). */
   applied: number;
+  submitted?: number;
+  submitted_unconfirmed?: number;
+  confirmed?: number;
+  needs_human?: number;
   failed: number;
   blocked: number;
   in_progress: number;

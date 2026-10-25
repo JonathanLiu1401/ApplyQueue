@@ -132,12 +132,12 @@ jobs:
       - name: Frontend unit tests (Vitest + coverage)
         run: npm run test:coverage
 
-      - name: Backend unit tests (pytest + coverage)
-        run: uv run pytest tests/ --cov --cov-report=term-missing --cov-report=xml
-
-      # ── Install Chromium ─────────────────────────────────────────────
+      # Chromium first: the mock-form test (answer-every-question) drives a real page.
       - name: Install Playwright Chromium
         run: uv run python -m playwright install chromium
+
+      - name: Backend unit tests (pytest + coverage)
+        run: uv run pytest tests/ --cov --cov-report=term-missing --cov-report=xml
 
       # ── Integration Tests (Source) ───────────────────────────────────
       - name: Run integration tests (source)
@@ -161,14 +161,14 @@ jobs:
         env:
           TEST_OPENROUTER_API_KEY: ${{ secrets.TEST_OPENROUTER_API_KEY }}
         run: |
-          uv run python scripts/integration-test.py --binary src-tauri/binaries/langhire-backend-${{ matrix.target }}
+          uv run python scripts/integration-test.py --binary src-tauri/binaries/applyqueue-backend-${{ matrix.target }}
 
       - name: Run integration tests (binary, Windows)
         if: runner.os == 'Windows' && env.TEST_OPENROUTER_API_KEY != ''
         env:
           TEST_OPENROUTER_API_KEY: ${{ secrets.TEST_OPENROUTER_API_KEY }}
         run: |
-          uv run python scripts/integration-test.py --binary src-tauri/binaries/langhire-backend-${{ matrix.target }}.exe
+          uv run python scripts/integration-test.py --binary src-tauri/binaries/applyqueue-backend-${{ matrix.target }}.exe
 
   intel-mac:
     # Intel Macs (x86_64) are a hard requirement: test natively, build the x86_64
@@ -206,7 +206,7 @@ jobs:
       - name: Build backend sidecar (x86_64)
         run: bash scripts/build-backend.sh x86_64-apple-darwin
       - name: Sidecar self-test (frozen binary)
-        run: src-tauri/binaries/langhire-backend-x86_64-apple-darwin --self-test
+        run: src-tauri/binaries/applyqueue-backend-x86_64-apple-darwin --self-test
       - name: Bundle Tauri app (x86_64, unsigned)
         run: npx tauri build --target x86_64-apple-darwin --bundles app,dmg
       - name: Launch packaged app and check /health

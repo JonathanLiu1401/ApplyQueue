@@ -8,7 +8,10 @@
     "applied": "Applied",
     "failed": "Failed",
     "blocked": "Blocked",
-    "inProgress": "In Progress"
+    "inProgress": "In Progress",
+    "submittedUnconfirmed": "Submitted (awaiting email)",
+    "confirmed": "Confirmed",
+    "needsHuman": "Needs you"
   },
   "filter": {
     "all": "All"

@@ -19,7 +19,6 @@ from pathlib import Path
 if not getattr(sys, 'frozen', False):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from browser_use import Agent, BrowserSession
 
 try:
     import core.shared_config as config
@@ -37,6 +36,9 @@ except ImportError:
         read_jobs, write_jobs, update_job,
     )
     from backend.core.agent_logger import on_step as _agent_on_step, on_done as _agent_on_done, log_run_start as _agent_log_start
+
+# Imported after `core` so core/privacy_env.py has disabled browser-use telemetry first.
+from browser_use import Agent, BrowserSession  # noqa: E402
 
 
 def load_jobs() -> dict:
@@ -113,7 +115,7 @@ async def collect_for_title(title: str, existing_jobs: dict, profile: dict, max_
                 jobs[url] = {
                     **job, "url": url,
                     "search_title": title, "status": "pending",
-                    "collected_at": now, "applied_at": None, "error": None,
+                    "collected_at": now, "submitted_at": None, "error": None,
                 }
             write_jobs(jobs)
             found.extend(new_in_step)

@@ -188,6 +188,18 @@ export async function updateJobStatus(url: string, status: string) {
   });
 }
 
+export interface VaultSite {
+  host: string;
+  username: string;
+  created_at: string | null;
+  source: string;
+}
+
+/** Sites with an ApplyQueue-generated password (never returns passwords). */
+export async function getVaultSites() {
+  return request<{ sites: VaultSite[]; legacy_shared_password: boolean }>("/vault/sites");
+}
+
 export async function addJob(url: string, title?: string, company?: string, source?: string) {
   return request<{ success: boolean }>("/jobs/add", {
     method: "POST",

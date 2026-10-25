@@ -1,4 +1,48 @@
-PERSONAL_DATA_INVENTORY.md
-_scratch/
+# --- build output / deps ---
 node_modules/
+out/
+dist/
+release/
+coverage/
+*.tsbuildinfo
+.vite/
 .DS_Store
+Thumbs.db
+
+# --- secrets: never commit to this PUBLIC repo ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.age
+*.keychain*
+credentials/
+sessions/
+browser-profiles/
+**/profiles/
+**/*password*.txt
+**/Cookies
+**/Cookies-journal
+**/Login Data*
+**/Local State
+**/Web Data
+
+# --- personal data: belongs in your PRIVATE sync repo / app data dir, not here ---
+PERSONAL_DATA_INVENTORY.md
+*INVENTORY*.md
+*.db
+*.sqlite
+*.sqlite3
+*.xlsx
+*.jsonl
+!templates/**/*.jsonl
+!packages/**/fixtures/**/*.jsonl
+profile.json
+knowledge.json
+answers.json
+resume*.pdf
+*.resume.pdf
+_scratch/

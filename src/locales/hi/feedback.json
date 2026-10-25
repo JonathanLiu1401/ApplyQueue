@@ -1,6 +1,6 @@
 {
   "title": "प्रतिक्रिया",
-  "subtitle": "अपने विचारों से LangHire को बेहतर बनाने में मदद करें",
+  "subtitle": "अपने विचारों से ApplyQueue को बेहतर बनाने में मदद करें",
   "viewDiscussions": "चर्चाएँ देखें",
   "categories": {
     "featureRequest": "फ़ीचर अनुरोध",
@@ -15,7 +15,7 @@
     "descriptionPlaceholder": "अपने फ़ीचर अनुरोध, बग, या प्रतिक्रिया का विस्तार से वर्णन करें...",
     "emailLabel": "ईमेल",
     "emailOptional": "(वैकल्पिक)",
-    "emailPlaceholder": "your@email.com",
+    "emailPlaceholder": "you@example.com",
     "emailHelp": "यदि आप चाहते हैं कि हम आपसे संपर्क करें तो अपना ईमेल शामिल करें।",
     "submit": "प्रतिक्रिया सबमिट करें",
     "submitting": "सबमिट हो रहा है..."

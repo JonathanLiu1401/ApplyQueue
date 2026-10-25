@@ -19,7 +19,7 @@
   "telemetry": {
     "title": "Datenschutz & Telemetrie",
     "usageAnalytics": "Nutzungsanalyse",
-    "description": "Helfen Sie LangHire zu verbessern, indem Sie anonyme Nutzungsdaten senden (Feature-Nutzung, Absturzberichte). Es werden keine persönlichen Daten oder Jobdaten übertragen."
+    "description": "Helfen Sie ApplyQueue zu verbessern, indem Sie anonyme Nutzungsdaten senden (Feature-Nutzung, Absturzberichte). Es werden keine persönlichen Daten oder Jobdaten übertragen."
   },
   "blockedDomains": {
     "title": "Blockierte Domains",

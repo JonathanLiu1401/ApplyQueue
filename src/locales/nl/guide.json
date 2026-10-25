@@ -1,6 +1,6 @@
 {
   "title": "Handleiding",
-  "subtitle": "Leer hoe je LangHire gebruikt en raadpleeg dit op elk moment",
+  "subtitle": "Leer hoe je ApplyQueue gebruikt en raadpleeg dit op elk moment",
   "howItWorks": { "title": "Hoe het werkt", "steps": { "profile": "Profiel", "aiSetup": "AI-setup", "collect": "Verzamelen", "apply": "Solliciteren", "learn": "Leren", "improve": "Verbeteren" }, "pipelineDescription": "Profiel instellen → AI configureren → Banen verzamelen van LinkedIn → Agent solliciteert automatisch → Leert van elke uitvoering → Wordt beter in de tijd" },
   "checklist": { "title": "Setup-checklist", "refreshStatus": "Status vernieuwen", "allDone": "Alle vereiste stappen zijn voltooid! Je bent klaar.", "configureAi": "AI-aanbieder configureren", "setResume": "CV-pad instellen", "setupProfile": "Profiel instellen", "optional": "(optioneel)", "setUp": "Instellen →" },
   "stepByStep": { "title": "Stapsgewijze handleiding" },

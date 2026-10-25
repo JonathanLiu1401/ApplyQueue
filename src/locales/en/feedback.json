@@ -1,6 +1,6 @@
 {
   "title": "Feedback",
-  "subtitle": "Help us improve LangHire with your thoughts",
+  "subtitle": "Help us improve ApplyQueue with your thoughts",
   "viewDiscussions": "View Discussions",
   "categories": {
     "featureRequest": "Feature Request",
@@ -15,7 +15,7 @@
     "descriptionPlaceholder": "Describe your feature request, bug, or feedback in detail...",
     "emailLabel": "Email",
     "emailOptional": "(optional)",
-    "emailPlaceholder": "your@email.com",
+    "emailPlaceholder": "you@example.com",
     "emailHelp": "Include your email if you'd like us to follow up.",
     "submit": "Submit Feedback",
     "submitting": "Submitting..."

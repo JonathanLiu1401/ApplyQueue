@@ -1,6 +1,6 @@
 {
   "title": "Panduan",
-  "subtitle": "Pelajari cara menggunakan LangHire dan rujuk pada bila-bila masa",
+  "subtitle": "Pelajari cara menggunakan ApplyQueue dan rujuk pada bila-bila masa",
   "howItWorks": { "title": "Cara Ia Berfungsi", "steps": { "profile": "Profil", "aiSetup": "Persediaan AI", "collect": "Kumpul", "apply": "Mohon", "learn": "Belajar", "improve": "Tingkat" }, "pipelineDescription": "Sediakan profil → Konfigurasi AI → Kumpul kerja dari LinkedIn → Ejen memohon secara automatik → Belajar dari setiap pelaksanaan → Bertambah baik dari masa ke masa" },
   "checklist": { "title": "Senarai Semak Persediaan", "refreshStatus": "Muat semula status", "allDone": "Semua langkah yang diperlukan telah selesai! Anda sudah sedia.", "configureAi": "Konfigurasi pembekal AI", "setResume": "Tetapkan laluan resume", "setupProfile": "Sediakan profil anda", "optional": "(pilihan)", "setUp": "Sediakan →" },
   "stepByStep": { "title": "Panduan Langkah demi Langkah" },

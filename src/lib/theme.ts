@@ -9,7 +9,7 @@
  */
 export type ThemeMode = "light" | "dark" | "system";
 
-const STORAGE_KEY = "langhire_theme";
+const STORAGE_KEY = "applyqueue_theme";
 
 export function getStoredTheme(): ThemeMode {
   const v = typeof localStorage !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;

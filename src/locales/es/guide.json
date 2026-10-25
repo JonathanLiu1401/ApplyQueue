@@ -1,6 +1,6 @@
 {
   "title": "Guía",
-  "subtitle": "Aprende a usar LangHire y consúltala en cualquier momento",
+  "subtitle": "Aprende a usar ApplyQueue y consúltala en cualquier momento",
   "howItWorks": {
     "title": "Cómo funciona",
     "steps": { "profile": "Perfil", "aiSetup": "Config. AI", "collect": "Recopilar", "apply": "Aplicar", "learn": "Aprender", "improve": "Mejorar" },

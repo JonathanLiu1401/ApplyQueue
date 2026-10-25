@@ -1,6 +1,6 @@
 {
   "title": "Comentarios",
-  "subtitle": "Ayúdanos a mejorar LangHire con tus ideas",
+  "subtitle": "Ayúdanos a mejorar ApplyQueue con tus ideas",
   "viewDiscussions": "Ver discusiones",
   "categories": {
     "featureRequest": "Solicitud de función",
@@ -15,7 +15,7 @@
     "descriptionPlaceholder": "Describe tu solicitud de función, error o comentario en detalle...",
     "emailLabel": "Correo electrónico",
     "emailOptional": "(opcional)",
-    "emailPlaceholder": "tu@email.com",
+    "emailPlaceholder": "you@example.com",
     "emailHelp": "Incluye tu correo si deseas que te contactemos.",
     "submit": "Enviar comentario",
     "submitting": "Enviando..."

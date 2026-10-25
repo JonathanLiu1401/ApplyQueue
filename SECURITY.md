@@ -15,7 +15,7 @@ Only the latest release receives security updates.
 
 Instead, use one of these private channels:
 
-1. **GitHub Security Advisories** (preferred): Go to the [Security tab](https://github.com/jaimaann/LangHire/security/advisories) and click "Report a vulnerability"
+1. **GitHub Security Advisories** (preferred): Go to the Security tab of this (private) repository and click "Report a vulnerability"
 2. **Email**: Contact the maintainer directly via GitHub profile
 
 ### What to include

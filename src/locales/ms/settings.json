@@ -19,7 +19,7 @@
   "telemetry": {
     "title": "Privasi & Telemetri",
     "usageAnalytics": "Analisis Penggunaan",
-    "description": "Bantu meningkatkan LangHire dengan menghantar data penggunaan tanpa nama (penggunaan ciri, laporan ranap). Tiada maklumat peribadi atau data kerja dihantar."
+    "description": "Bantu meningkatkan ApplyQueue dengan menghantar data penggunaan tanpa nama (penggunaan ciri, laporan ranap). Tiada maklumat peribadi atau data kerja dihantar."
   },
   "blockedDomains": {
     "title": "Domain Disekat",

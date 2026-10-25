@@ -1,6 +1,6 @@
 {
   "title": "Maklum Balas",
-  "subtitle": "Bantu kami meningkatkan LangHire dengan pandangan anda",
+  "subtitle": "Bantu kami meningkatkan ApplyQueue dengan pandangan anda",
   "viewDiscussions": "Lihat Perbincangan",
   "categories": {
     "featureRequest": "Permintaan Ciri",
@@ -15,7 +15,7 @@
     "descriptionPlaceholder": "Huraikan permintaan ciri, pepijat, atau maklum balas anda secara terperinci...",
     "emailLabel": "E-mel",
     "emailOptional": "(pilihan)",
-    "emailPlaceholder": "anda@email.com",
+    "emailPlaceholder": "you@example.com",
     "emailHelp": "Sertakan e-mel anda jika anda mahu kami membuat susulan.",
     "submit": "Hantar Maklum Balas",
     "submitting": "Menghantar..."

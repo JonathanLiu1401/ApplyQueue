@@ -3,7 +3,7 @@
  *
  * - Cmd/Ctrl + 1..8  → navigate to the Nth page (order matches the sidebar)
  * - Cmd/Ctrl + ,     → open Settings
- * - Cmd/Ctrl + E     → trigger an export (dispatches a `langhire:export` event)
+ * - Cmd/Ctrl + E     → trigger an export (dispatches a `applyqueue:export` event)
  *
  * Shortcuts are ignored while the user is typing in an input/textarea/select
  * or a contentEditable element, so they never clobber normal text entry.
@@ -53,7 +53,7 @@ export function useKeyboardShortcuts(): void {
       // Cmd/Ctrl + E → export (page decides what to do)
       if (e.key.toLowerCase() === "e") {
         e.preventDefault();
-        window.dispatchEvent(new CustomEvent("langhire:export"));
+        window.dispatchEvent(new CustomEvent("applyqueue:export"));
         return;
       }
 

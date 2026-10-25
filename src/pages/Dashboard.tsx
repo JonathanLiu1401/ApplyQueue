@@ -127,12 +127,12 @@ export default function Dashboard() {
         .catch(() => {});
     };
     window.addEventListener("focus", refreshSetup);
-    window.addEventListener("langhire:setup-updated", refreshSetup);
+    window.addEventListener("applyqueue:setup-updated", refreshSetup);
     document.addEventListener("visibilitychange", refreshSetup);
     return () => {
       active = false;
       window.removeEventListener("focus", refreshSetup);
-      window.removeEventListener("langhire:setup-updated", refreshSetup);
+      window.removeEventListener("applyqueue:setup-updated", refreshSetup);
       document.removeEventListener("visibilitychange", refreshSetup);
     };
   }, []);

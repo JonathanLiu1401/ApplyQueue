@@ -19,7 +19,7 @@ if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
 # Build with PyInstaller
 uv run python -m PyInstaller `
   --onefile `
-  --name "langhire-backend-$Target" `
+  --name "applyqueue-backend-$Target" `
   --distpath src-tauri/binaries `
   --workpath build/pyinstaller `
   --specpath build `
@@ -56,7 +56,7 @@ uv run python -m PyInstaller `
   --clean `
   backend/main.py
 
-$BinaryPath = "src-tauri/binaries/langhire-backend-" + $Target + ".exe"
+$BinaryPath = "src-tauri/binaries/applyqueue-backend-" + $Target + ".exe"
 Write-Host "Backend binary built: $BinaryPath"
 Get-Item $BinaryPath | Select-Object Name, Length
 

@@ -19,7 +19,7 @@
   "telemetry": {
     "title": "Privacy & telemetrie",
     "usageAnalytics": "Gebruiksanalyse",
-    "description": "Help LangHire te verbeteren door anonieme gebruiksgegevens te verzenden (functiegebruik, crashrapporten). Er worden geen persoonlijke gegevens of baangegevens verzonden."
+    "description": "Help ApplyQueue te verbeteren door anonieme gebruiksgegevens te verzenden (functiegebruik, crashrapporten). Er worden geen persoonlijke gegevens of baangegevens verzonden."
   },
   "blockedDomains": {
     "title": "Geblokkeerde domeinen",

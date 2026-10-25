@@ -199,7 +199,7 @@ describe("analytics — client id persistence", () => {
     const analytics = await loadAnalytics({ measurementId: "G-TEST123" });
     await analytics.initAnalytics(true);
 
-    const stored = localStorage.getItem("langhire_ga_client_id");
+    const stored = localStorage.getItem("applyqueue_ga_client_id");
     expect(stored).toBeTruthy();
 
     fetchMock.mockClear();
@@ -209,7 +209,7 @@ describe("analytics — client id persistence", () => {
   });
 
   it("uses a pre-existing client id from localStorage", async () => {
-    localStorage.setItem("langhire_ga_client_id", "preset-client-id");
+    localStorage.setItem("applyqueue_ga_client_id", "preset-client-id");
     const analytics = await loadAnalytics({ measurementId: "G-TEST123" });
     await analytics.initAnalytics(true);
     const payload = JSON.parse(fetchMock.mock.calls[0][1].body as string);
@@ -221,10 +221,10 @@ describe("analytics — setTelemetryEnabled", () => {
   it("writes the preference to localStorage", async () => {
     const analytics = await loadAnalytics({ measurementId: "G-TEST123" });
     analytics.setTelemetryEnabled(false);
-    expect(localStorage.getItem("langhire_telemetry")).toBe("false");
+    expect(localStorage.getItem("applyqueue_telemetry")).toBe("false");
 
     analytics.setTelemetryEnabled(true);
-    expect(localStorage.getItem("langhire_telemetry")).toBe("true");
+    expect(localStorage.getItem("applyqueue_telemetry")).toBe("true");
   });
 
   it("auto-initializes analytics when enabled and GA is configured but not yet initialized", async () => {
@@ -244,5 +244,25 @@ describe("analytics — setTelemetryEnabled", () => {
     analytics.setTelemetryEnabled(true);
     await Promise.resolve();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("analytics — opt-in default", () => {
+  it("sends nothing by default even with GA configured (no initAnalytics(true))", async () => {
+    const analytics = await loadAnalytics({ measurementId: "G-TEST123" });
+    analytics.trackEvent("x");
+    analytics.trackPageView("/");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(analytics.isTelemetryOptedIn()).toBe(false);
+  });
+
+  it("isTelemetryOptedIn is true only for an explicit 'true'", async () => {
+    const analytics = await loadAnalytics({ measurementId: "G-TEST123" });
+    await analytics.initAnalytics(false);
+    expect(analytics.isTelemetryOptedIn()).toBe(false);
+    localStorage.setItem("applyqueue_telemetry", "yes");
+    expect(analytics.isTelemetryOptedIn()).toBe(false);
+    await analytics.initAnalytics(true);
+    expect(analytics.isTelemetryOptedIn()).toBe(true);
   });
 });

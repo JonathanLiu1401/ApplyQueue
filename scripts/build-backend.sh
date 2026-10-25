@@ -47,7 +47,7 @@ fi
 # Build with PyInstaller
 uv run python -m PyInstaller \
   --onefile \
-  --name "langhire-backend-${TARGET}" \
+  --name "applyqueue-backend-${TARGET}" \
   --distpath src-tauri/binaries \
   --workpath build/pyinstaller \
   --specpath build \
@@ -84,17 +84,17 @@ uv run python -m PyInstaller \
   --clean \
   backend/main.py
 
-echo "✅ Backend binary built: src-tauri/binaries/langhire-backend-${TARGET}"
-ls -lh "src-tauri/binaries/langhire-backend-${TARGET}"
+echo "✅ Backend binary built: src-tauri/binaries/applyqueue-backend-${TARGET}"
+ls -lh "src-tauri/binaries/applyqueue-backend-${TARGET}"
 if [ "$(uname -s)" = "Darwin" ]; then
-  echo "Architectures: $(lipo -archs "src-tauri/binaries/langhire-backend-${TARGET}")"
+  echo "Architectures: $(lipo -archs "src-tauri/binaries/applyqueue-backend-${TARGET}")"
 fi
 
 # Sign the sidecar binary with entitlements (macOS only)
 # This allows the PyInstaller binary to load its extracted Python.framework
 # without macOS Sequoia blocking the unsigned dlopen()
 if [ "$(uname -s)" = "Darwin" ]; then
-  BINARY="src-tauri/binaries/langhire-backend-${TARGET}"
+  BINARY="src-tauri/binaries/applyqueue-backend-${TARGET}"
   ENTITLEMENTS="src-tauri/Entitlements.plist"
 
   if [ -f "$ENTITLEMENTS" ]; then

@@ -292,7 +292,6 @@ LangHire/
 ├── cli/                        # CLI automation scripts
 │   ├── collect_jobs.py         # Job collection
 │   ├── apply_jobs.py           # Job application (multi-worker)
-│   ├── apply_jobs_tailored.py  # Tailored resume variant
 │   ├── dashboard.py            # Terminal analytics dashboard
 │   └── memory_cli.py           # Memory management
 │
@@ -313,7 +312,6 @@ uv run python cli/collect_jobs.py
 uv run python cli/apply_jobs.py --workers 3
 
 # Apply with per-job tailored resumes
-uv run python cli/apply_jobs_tailored.py --workers 2
 
 # Memory management
 uv run python cli/memory_cli.py stats

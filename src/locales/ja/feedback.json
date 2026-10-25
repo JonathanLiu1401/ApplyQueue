@@ -1,6 +1,6 @@
 {
   "title": "フィードバック",
-  "subtitle": "あなたのご意見でLangHireの改善にご協力ください",
+  "subtitle": "あなたのご意見でApplyQueueの改善にご協力ください",
   "viewDiscussions": "ディスカッションを見る",
   "categories": {
     "featureRequest": "機能リクエスト",
@@ -15,7 +15,7 @@
     "descriptionPlaceholder": "機能リクエスト、バグ、またはフィードバックの詳細を記述してください...",
     "emailLabel": "メールアドレス",
     "emailOptional": "（任意）",
-    "emailPlaceholder": "your@email.com",
+    "emailPlaceholder": "you@example.com",
     "emailHelp": "フォローアップを希望される場合はメールアドレスを含めてください。",
     "submit": "フィードバックを送信",
     "submitting": "送信中..."

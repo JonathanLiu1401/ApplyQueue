@@ -19,7 +19,7 @@
   "telemetry": {
     "title": "隐私与遥测",
     "usageAnalytics": "使用情况分析",
-    "description": "通过发送匿名使用数据（功能使用情况、崩溃报告）帮助改进 LangHire。不会传输任何个人信息或职位数据。"
+    "description": "通过发送匿名使用数据（功能使用情况、崩溃报告）帮助改进 ApplyQueue。不会传输任何个人信息或职位数据。"
   },
   "blockedDomains": {
     "title": "已阻止的域名",

@@ -112,10 +112,16 @@ describe("App", () => {
     await waitFor(() => expect(mockInitAnalytics).toHaveBeenCalledWith(true));
   });
 
-  it("falls back to initAnalytics(true) when getSettings rejects", async () => {
+  it("falls back to telemetry OFF (initAnalytics(false)) when getSettings rejects", async () => {
     mockGetSettings.mockRejectedValue(new Error("offline"));
     renderApp(["/"]);
-    await waitFor(() => expect(mockInitAnalytics).toHaveBeenCalledWith(true));
+    await waitFor(() => expect(mockInitAnalytics).toHaveBeenCalledWith(false));
+  });
+
+  it("keeps telemetry OFF when the setting is missing (opt-in only)", async () => {
+    mockGetSettings.mockResolvedValue({} as never);
+    renderApp(["/"]);
+    await waitFor(() => expect(mockInitAnalytics).toHaveBeenCalledWith(false));
   });
 
   it("tracks a page view for the current path", async () => {

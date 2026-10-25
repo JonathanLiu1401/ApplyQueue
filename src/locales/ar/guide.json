@@ -1,6 +1,6 @@
 {
   "title": "الدليل",
-  "subtitle": "تعلم كيفية استخدام LangHire وارجع إليه في أي وقت",
+  "subtitle": "تعلم كيفية استخدام ApplyQueue وارجع إليه في أي وقت",
   "howItWorks": { "title": "كيف يعمل", "steps": { "profile": "الملف الشخصي", "aiSetup": "إعداد AI", "collect": "جمع", "apply": "تقديم", "learn": "تعلم", "improve": "تحسين" }, "pipelineDescription": "إعداد الملف الشخصي → تكوين AI → جمع الوظائف من LinkedIn → الوكيل يتقدم تلقائياً → يتعلم من كل تشغيل → يتحسن مع الوقت" },
   "checklist": { "title": "قائمة التحقق", "refreshStatus": "تحديث الحالة", "allDone": "جميع الخطوات المطلوبة مكتملة! أنت جاهز.", "configureAi": "تكوين مزود AI", "setResume": "تعيين مسار السيرة الذاتية", "setupProfile": "إعداد ملفك الشخصي", "optional": "(اختياري)", "setUp": "إعداد →" },
   "stepByStep": { "title": "دليل خطوة بخطوة" },

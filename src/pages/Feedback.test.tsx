@@ -11,8 +11,9 @@ vi.mock("react-i18next", () => ({
 // Feedback reads VITE_GITHUB_TOKEN into a module-level const at import time, so
 // we must stub the env BEFORE importing the component. Use a fresh dynamic
 // import per test (resetModules) so each test controls the captured token.
-async function loadFeedback(token: string): Promise<ComponentType> {
+async function loadFeedback(token: string, repo = "example-org/applyqueue-feedback"): Promise<ComponentType> {
   vi.stubEnv("VITE_GITHUB_TOKEN", token);
+  vi.stubEnv("VITE_FEEDBACK_REPO", repo);
   vi.resetModules();
   const mod = await import("./Feedback");
   return mod.default;
@@ -44,7 +45,7 @@ const REPO_OK = {
 };
 
 const MUTATION_OK = {
-  data: { createDiscussion: { discussion: { url: "https://github.com/jaimaann/LangHire/discussions/42" } } },
+  data: { createDiscussion: { discussion: { url: "https://github.com/example-org/applyqueue-feedback/discussions/42" } } },
 };
 
 describe("Feedback", () => {
@@ -80,6 +81,19 @@ describe("Feedback", () => {
 
     await user.type(screen.getByPlaceholderText("form.descriptionPlaceholder"), "Details");
     expect(submit).toBeEnabled();
+  });
+
+  it("never targets the upstream LangHire repo: a token without a configured repo is not enough", async () => {
+    const Feedback = await loadFeedback("tok", "");
+    const fetchFn = stubFetchSequence();
+    const user = userEvent.setup();
+    render(<Feedback />);
+    expect(screen.queryByText("viewDiscussions")).not.toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText("form.titlePlaceholder"), "T");
+    await user.type(screen.getByPlaceholderText("form.descriptionPlaceholder"), "D");
+    await user.click(screen.getByRole("button", { name: /form\.submit/ }));
+    expect(await screen.findByText("error.notConfigured")).toBeInTheDocument();
+    expect(fetchFn).not.toHaveBeenCalled();
   });
 
   it("shows the not-configured error when no GitHub token is set", async () => {

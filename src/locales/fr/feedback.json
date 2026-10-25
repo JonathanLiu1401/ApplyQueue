@@ -1,6 +1,6 @@
 {
   "title": "Retours",
-  "subtitle": "Aidez-nous à améliorer LangHire avec vos idées",
+  "subtitle": "Aidez-nous à améliorer ApplyQueue avec vos idées",
   "viewDiscussions": "Voir les discussions",
   "categories": {
     "featureRequest": "Demande de fonctionnalité",
@@ -15,7 +15,7 @@
     "descriptionPlaceholder": "Décrivez votre demande de fonctionnalité, bug ou retour en détail...",
     "emailLabel": "E-mail",
     "emailOptional": "(optionnel)",
-    "emailPlaceholder": "votre@email.com",
+    "emailPlaceholder": "you@example.com",
     "emailHelp": "Incluez votre e-mail si vous souhaitez que nous vous recontactions.",
     "submit": "Envoyer le retour",
     "submitting": "Envoi en cours..."

@@ -45,9 +45,10 @@ export default function App() {
     getSettings()
       .then((s) => {
         measureAndTrack("backend_connect");
-        initAnalytics(s.telemetry_enabled !== false);
+        // Opt-in: only an explicit `true` enables telemetry.
+        initAnalytics(s.telemetry_enabled === true);
       })
-      .catch(() => initAnalytics(true));
+      .catch(() => initAnalytics(false));
   }, []);
 
   useEffect(() => {

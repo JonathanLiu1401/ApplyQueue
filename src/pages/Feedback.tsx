@@ -4,8 +4,13 @@ import { useTranslation } from "react-i18next";
 
 const GITHUB_TOKEN = import.meta.env.VITE_GITHUB_TOKEN || "";
 const GITHUB_GRAPHQL_URL = "https://api.github.com/graphql";
-const REPO_OWNER = "jaimaann";
-const REPO_NAME = "LangHire";
+// ApplyQueue never posts feedback to the upstream LangHire repository. In-app
+// submission is only enabled when a build explicitly configures BOTH a target
+// repository ("owner/name") and a token; otherwise the form reports
+// "not configured" and nothing leaves the machine.
+const FEEDBACK_REPO = (import.meta.env.VITE_FEEDBACK_REPO || "").trim();
+const [REPO_OWNER = "", REPO_NAME = ""] = FEEDBACK_REPO.split("/");
+const FEEDBACK_CONFIGURED = Boolean(GITHUB_TOKEN && REPO_OWNER && REPO_NAME);
 
 const CATEGORY_KEYS = ["featureRequest", "bugReport", "generalFeedback"] as const;
 const CATEGORY_MAP: Record<string, string> = {
@@ -65,7 +70,7 @@ export default function Feedback() {
       setError(t("error.fillRequired"));
       return;
     }
-    if (!GITHUB_TOKEN) {
+    if (!FEEDBACK_CONFIGURED) {
       setError(t("error.notConfigured"));
       return;
     }
@@ -94,15 +99,17 @@ export default function Feedback() {
           <h1 className="text-2xl font-bold text-foreground tracking-tight">{t("title")}</h1>
           <p className="text-[13px] text-muted-foreground mt-1">{t("subtitle")}</p>
         </div>
-        <a
-          href="https://github.com/jaimaann/LangHire/discussions"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="btn-secondary text-xs"
-        >
-          <MessageSquare className="w-3.5 h-3.5" />
-          {t("viewDiscussions")}
-        </a>
+        {FEEDBACK_CONFIGURED && (
+          <a
+            href={`https://github.com/${REPO_OWNER}/${REPO_NAME}/discussions`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn-secondary text-xs"
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
+            {t("viewDiscussions")}
+          </a>
+        )}
       </div>
 
       {error && (

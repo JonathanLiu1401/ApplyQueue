@@ -477,7 +477,7 @@ The AI agent (powered by an LLM + Playwright browser) will follow your prompts t
 3. Select your `.yaml` file
 4. The plugin appears in the job source dropdown for matching countries
 
-**Or manually:** Copy your `.yaml` file to `~/.langhire/plugins/` (macOS: `~/Library/Application Support/langhire/plugins/`)
+**Or manually:** Copy your `.yaml` file to `<data dir>/plugins/` (Linux: `~/.config/applyqueue/plugins/`, macOS: `~/Library/Application Support/applyqueue/plugins/`)
 
 #### Sharing with the Community
 

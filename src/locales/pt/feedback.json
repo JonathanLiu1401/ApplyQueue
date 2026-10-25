@@ -1,6 +1,6 @@
 {
   "title": "Feedback",
-  "subtitle": "Ajude-nos a melhorar o LangHire com suas ideias",
+  "subtitle": "Ajude-nos a melhorar o ApplyQueue com suas ideias",
   "viewDiscussions": "Ver discussões",
   "categories": {
     "featureRequest": "Solicitação de recurso",
@@ -15,7 +15,7 @@
     "descriptionPlaceholder": "Descreva sua solicitação de recurso, bug ou feedback em detalhes...",
     "emailLabel": "E-mail",
     "emailOptional": "(opcional)",
-    "emailPlaceholder": "seu@email.com",
+    "emailPlaceholder": "you@example.com",
     "emailHelp": "Inclua seu e-mail se deseja que entremos em contato.",
     "submit": "Enviar feedback",
     "submitting": "Enviando..."

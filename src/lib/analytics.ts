@@ -3,16 +3,27 @@ const GA_ENDPOINT = "https://www.google-analytics.com/mp/collect";
 const GA_API_SECRET = import.meta.env.VITE_GA_API_SECRET || "";
 
 let initialized = false;
-let telemetryEnabled = true;
+// Telemetry is opt-in: nothing is sent until the user enables it in Settings.
+let telemetryEnabled = false;
+const TELEMETRY_KEY = "applyqueue_telemetry";
+
+/** True only when the user explicitly opted in (persisted as "true"). */
+export function isTelemetryOptedIn(): boolean {
+  try {
+    return localStorage.getItem(TELEMETRY_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
 let sessionStart = 0;
 let clientId = "";
 
 function getClientId(): string {
   if (clientId) return clientId;
-  let stored = localStorage.getItem("langhire_ga_client_id");
+  let stored = localStorage.getItem("applyqueue_ga_client_id");
   if (!stored) {
     stored = `${Date.now()}.${Math.random().toString(36).slice(2)}`;
-    localStorage.setItem("langhire_ga_client_id", stored);
+    localStorage.setItem("applyqueue_ga_client_id", stored);
   }
   clientId = stored;
   return clientId;
@@ -41,7 +52,14 @@ function sendToGA(events: Array<{ name: string; params?: Record<string, unknown>
 }
 
 export async function initAnalytics(enabled: boolean): Promise<void> {
-  telemetryEnabled = enabled;
+  telemetryEnabled = enabled === true;
+  try {
+    // Mirror the backend setting so crash reporting (initialised before the
+    // backend is reachable) follows the same consent on the next launch.
+    localStorage.setItem(TELEMETRY_KEY, String(telemetryEnabled));
+  } catch {
+    /* storage unavailable */
+  }
   if (!GA_ID || !enabled || initialized) return;
 
   initialized = true;
@@ -62,7 +80,7 @@ export async function initAnalytics(enabled: boolean): Promise<void> {
 
 export function setTelemetryEnabled(enabled: boolean): void {
   telemetryEnabled = enabled;
-  localStorage.setItem("langhire_telemetry", String(enabled));
+  localStorage.setItem(TELEMETRY_KEY, String(enabled));
   if (enabled && !initialized && GA_ID) initAnalytics(true);
 }
 

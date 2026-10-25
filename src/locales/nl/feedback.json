@@ -1,6 +1,6 @@
 {
   "title": "Feedback",
-  "subtitle": "Help ons LangHire te verbeteren met je ideeën",
+  "subtitle": "Help ons ApplyQueue te verbeteren met je ideeën",
   "viewDiscussions": "Discussies bekijken",
   "categories": {
     "featureRequest": "Functieverzoek",
@@ -15,7 +15,7 @@
     "descriptionPlaceholder": "Beschrijf je functieverzoek, bug of feedback in detail...",
     "emailLabel": "E-mail",
     "emailOptional": "(optioneel)",
-    "emailPlaceholder": "jouw@email.com",
+    "emailPlaceholder": "you@example.com",
     "emailHelp": "Voeg je e-mail toe als je wilt dat we contact opnemen.",
     "submit": "Feedback versturen",
     "submitting": "Versturen..."

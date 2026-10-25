@@ -33,13 +33,13 @@ describe("useKeyboardShortcuts", () => {
     expect(mockNavigate).toHaveBeenCalledWith("/settings");
   });
 
-  it("dispatches a langhire:export event on Cmd/Ctrl+E", () => {
+  it("dispatches a applyqueue:export event on Cmd/Ctrl+E", () => {
     renderHook(() => useKeyboardShortcuts());
     const spy = vi.fn();
-    window.addEventListener("langhire:export", spy);
+    window.addEventListener("applyqueue:export", spy);
     press("e");
     expect(spy).toHaveBeenCalled();
-    window.removeEventListener("langhire:export", spy);
+    window.removeEventListener("applyqueue:export", spy);
   });
 
   it("ignores shortcuts without the modifier key", () => {

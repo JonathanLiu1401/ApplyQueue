@@ -19,7 +19,7 @@
   "telemetry": {
     "title": "개인정보 보호 및 텔레메트리",
     "usageAnalytics": "사용 분석",
-    "description": "익명 사용 데이터(기능 사용, 충돌 보고서)를 전송하여 LangHire 개선에 도움을 주세요. 개인 정보나 채용 데이터는 전송되지 않습니다."
+    "description": "익명 사용 데이터(기능 사용, 충돌 보고서)를 전송하여 ApplyQueue 개선에 도움을 주세요. 개인 정보나 채용 데이터는 전송되지 않습니다."
   },
   "blockedDomains": {
     "title": "차단된 도메인",

@@ -1,6 +1,6 @@
 {
   "title": "الملاحظات",
-  "subtitle": "ساعدنا في تحسين LangHire بأفكارك",
+  "subtitle": "ساعدنا في تحسين ApplyQueue بأفكارك",
   "viewDiscussions": "عرض النقاشات",
   "categories": {
     "featureRequest": "طلب ميزة",
@@ -15,7 +15,7 @@
     "descriptionPlaceholder": "صف طلب الميزة أو الخطأ أو ملاحظاتك بالتفصيل...",
     "emailLabel": "البريد الإلكتروني",
     "emailOptional": "(اختياري)",
-    "emailPlaceholder": "your@email.com",
+    "emailPlaceholder": "you@example.com",
     "emailHelp": "أدرج بريدك الإلكتروني إذا كنت ترغب أن نتواصل معك.",
     "submit": "إرسال الملاحظات",
     "submitting": "جارٍ الإرسال..."

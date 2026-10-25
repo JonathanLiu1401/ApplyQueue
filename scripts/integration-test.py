@@ -1,5 +1,5 @@
 """
-Integration test script for LangHire backend.
+Integration test script for ApplyQueue backend.
 Tests the built binary or source backend on each platform.
 Validates: health, LLM connection, Chromium, plugins, countries, profile, cover letter.
 
@@ -8,7 +8,7 @@ Usage:
   python scripts/integration-test.py
 
   # Test against built binary
-  python scripts/integration-test.py --binary src-tauri/binaries/langhire-backend-aarch64-apple-darwin
+  python scripts/integration-test.py --binary src-tauri/binaries/applyqueue-backend-aarch64-apple-darwin
 """
 import argparse
 import json
@@ -45,11 +45,11 @@ def wait_for_backend() -> bool:
 
 def read_token() -> str:
     if sys.platform == "darwin":
-        path = os.path.expanduser("~/Library/Application Support/langhire/.api_token")
+        path = os.path.expanduser("~/Library/Application Support/applyqueue/.api_token")
     elif sys.platform == "win32":
-        path = os.path.join(os.environ.get("APPDATA", ""), "langhire", ".api_token")
+        path = os.path.join(os.environ.get("APPDATA", ""), "applyqueue", ".api_token")
     else:
-        path = os.path.expanduser("~/.config/langhire/.api_token")
+        path = os.path.expanduser("~/.config/applyqueue/.api_token")
 
     for _ in range(10):
         if os.path.exists(path):
@@ -257,7 +257,7 @@ def test_collection_dry_run():
 def main():
     global TOKEN
 
-    parser = argparse.ArgumentParser(description="LangHire integration tests")
+    parser = argparse.ArgumentParser(description="ApplyQueue integration tests")
     parser.add_argument("--binary", help="Path to built backend binary (omit to test source)")
     args = parser.parse_args()
 

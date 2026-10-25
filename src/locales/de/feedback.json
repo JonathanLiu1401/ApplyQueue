@@ -1,6 +1,6 @@
 {
   "title": "Feedback",
-  "subtitle": "Helfen Sie uns, LangHire mit Ihren Gedanken zu verbessern",
+  "subtitle": "Helfen Sie uns, ApplyQueue mit Ihren Gedanken zu verbessern",
   "viewDiscussions": "Diskussionen ansehen",
   "categories": {
     "featureRequest": "Feature-Anfrage",
@@ -15,7 +15,7 @@
     "descriptionPlaceholder": "Beschreiben Sie Ihre Feature-Anfrage, den Fehler oder Ihr Feedback im Detail...",
     "emailLabel": "E-Mail",
     "emailOptional": "(optional)",
-    "emailPlaceholder": "ihre@email.com",
+    "emailPlaceholder": "you@example.com",
     "emailHelp": "Geben Sie Ihre E-Mail an, wenn wir uns bei Ihnen melden sollen.",
     "submit": "Feedback absenden",
     "submitting": "Wird gesendet..."

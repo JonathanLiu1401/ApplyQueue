@@ -1,6 +1,6 @@
 {
   "title": "ガイド",
-  "subtitle": "LangHireの使い方を学び、いつでも参照してください",
+  "subtitle": "ApplyQueueの使い方を学び、いつでも参照してください",
   "howItWorks": { "title": "仕組み", "steps": { "profile": "プロフィール", "aiSetup": "AI設定", "collect": "収集", "apply": "応募", "learn": "学習", "improve": "改善" }, "pipelineDescription": "プロフィール設定 → AI設定 → LinkedInから求人収集 → エージェントが自動応募 → 毎回の実行から学習 → 時間とともに改善" },
   "checklist": { "title": "セットアップチェックリスト", "refreshStatus": "ステータスを更新", "allDone": "すべての必須ステップが完了しました！準備ができています。", "configureAi": "AIプロバイダーを設定", "setResume": "履歴書のパスを設定", "setupProfile": "プロフィールを設定", "optional": "（任意）", "setUp": "設定する →" },
   "stepByStep": { "title": "ステップバイステップガイド" },

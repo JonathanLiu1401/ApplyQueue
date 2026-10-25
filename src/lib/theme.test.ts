@@ -38,9 +38,9 @@ describe("theme", () => {
   });
 
   it("returns the stored value when valid, else falls back to system", () => {
-    localStorage.setItem("langhire_theme", "dark");
+    localStorage.setItem("applyqueue_theme", "dark");
     expect(getStoredTheme()).toBe("dark");
-    localStorage.setItem("langhire_theme", "bogus");
+    localStorage.setItem("applyqueue_theme", "bogus");
     expect(getStoredTheme()).toBe("system");
   });
 
@@ -66,13 +66,13 @@ describe("theme", () => {
   it("setTheme persists to localStorage and applies", () => {
     stubMatchMedia(false);
     setTheme("dark");
-    expect(localStorage.getItem("langhire_theme")).toBe("dark");
+    expect(localStorage.getItem("applyqueue_theme")).toBe("dark");
     expect(document.documentElement.classList.contains("dark")).toBe(true);
   });
 
   it("initTheme applies stored theme and reacts to OS changes while in system mode", () => {
     const { fire } = stubMatchMedia(true);
-    localStorage.setItem("langhire_theme", "system");
+    localStorage.setItem("applyqueue_theme", "system");
     const cleanup = initTheme();
     // system + OS dark → dark applied
     expect(document.documentElement.classList.contains("dark")).toBe(true);
@@ -84,7 +84,7 @@ describe("theme", () => {
 
   it("initTheme does not override an explicit choice on OS change", () => {
     const { fire } = stubMatchMedia(true);
-    localStorage.setItem("langhire_theme", "light");
+    localStorage.setItem("applyqueue_theme", "light");
     const cleanup = initTheme();
     expect(document.documentElement.classList.contains("dark")).toBe(false);
     fire(); // OS goes dark, but user chose light

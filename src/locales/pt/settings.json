@@ -19,7 +19,7 @@
   "telemetry": {
     "title": "Privacidade e telemetria",
     "usageAnalytics": "Análise de uso",
-    "description": "Ajude a melhorar o LangHire enviando dados de uso anônimos (uso de recursos, relatórios de falhas). Nenhuma informação pessoal ou dados de vagas são transmitidos."
+    "description": "Ajude a melhorar o ApplyQueue enviando dados de uso anônimos (uso de recursos, relatórios de falhas). Nenhuma informação pessoal ou dados de vagas são transmitidos."
   },
   "blockedDomains": {
     "title": "Domínios bloqueados",

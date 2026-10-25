@@ -17,7 +17,7 @@ body:
     attributes:
       label: Proposed Solution
       description: How would you like this to work?
-      placeholder: "It would be great if LangHire could..."
+      placeholder: "It would be great if ApplyQueue could..."
     validations:
       required: true
 

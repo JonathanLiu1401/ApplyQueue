@@ -32,7 +32,7 @@ export const LANGUAGE_NAMES: Record<SupportedLanguage, string> = {
   zh: '中文',
 };
 
-const STORAGE_KEY = 'langhire_language';
+const STORAGE_KEY = 'applyqueue_language';
 
 export function getLanguageFromCountry(countryCode: string): SupportedLanguage {
   return COUNTRY_TO_LANGUAGE[countryCode] || 'en';

@@ -1,6 +1,6 @@
 {
   "title": "피드백",
-  "subtitle": "여러분의 의견으로 LangHire 개선에 도움을 주세요",
+  "subtitle": "여러분의 의견으로 ApplyQueue 개선에 도움을 주세요",
   "viewDiscussions": "토론 보기",
   "categories": {
     "featureRequest": "기능 요청",
@@ -15,7 +15,7 @@
     "descriptionPlaceholder": "기능 요청, 버그 또는 피드백을 상세히 설명해 주세요...",
     "emailLabel": "이메일",
     "emailOptional": "(선택사항)",
-    "emailPlaceholder": "your@email.com",
+    "emailPlaceholder": "you@example.com",
     "emailHelp": "후속 조치를 원하시면 이메일을 포함해 주세요.",
     "submit": "피드백 제출",
     "submitting": "제출 중..."

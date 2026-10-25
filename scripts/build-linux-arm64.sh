@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build LangHire .deb for ARM64 Linux (run this ON an ARM64 Linux machine)
+# Build ApplyQueue .deb for ARM64 Linux (run this ON an ARM64 Linux machine)
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

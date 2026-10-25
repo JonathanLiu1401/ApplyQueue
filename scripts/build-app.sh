@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build the LangHire desktop app + installer for the CURRENT host OS.
+# Build the ApplyQueue desktop app + installer for the CURRENT host OS.
 #
 #   macOS  → .app + .dmg   (src-tauri/target/release/bundle/{macos,dmg})
 #   Linux  → .deb + .AppImage (src-tauri/target/release/bundle/{deb,appimage})
@@ -40,7 +40,7 @@ OS=$(uname -s)
 ARCH=$(uname -m)
 
 echo "════════════════════════════════════════════════════════"
-echo " LangHire build — host: $OS/$ARCH ${DEBUG_FLAG:+(debug)}"
+echo " ApplyQueue build — host: $OS/$ARCH ${DEBUG_FLAG:+(debug)}"
 echo "════════════════════════════════════════════════════════"
 
 if [ "$OS" != "Darwin" ] && [ "$OS" != "Linux" ]; then
@@ -50,14 +50,14 @@ if [ "$OS" != "Darwin" ] && [ "$OS" != "Linux" ]; then
 fi
 
 # ── 0. Optional: clear local app data for a fresh-install test ───────────────
-# Mirrors core.config.get_data_dir(): macOS → ~/Library/Application Support/langhire,
-# Linux → ~/.config/langhire. Removes profile, jobs, memory DB, settings,
+# Mirrors core.config.get_data_dir(): macOS → ~/Library/Application Support/applyqueue,
+# Linux → ~/.config/applyqueue. Removes profile, jobs, memory DB, settings,
 # saved logins/cookies, and the onboarding flag.
 if [ "$CLEAN_DATA" = "1" ]; then
   if [ "$OS" = "Darwin" ]; then
-    DATA_DIR="$HOME/Library/Application Support/langhire"
+    DATA_DIR="$HOME/Library/Application Support/applyqueue"
   else
-    DATA_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/langhire"
+    DATA_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/applyqueue"
   fi
 
   if [ -d "$DATA_DIR" ]; then
@@ -126,7 +126,7 @@ if [ "$OS" = "Darwin" ]; then
   ls -1 "$BUNDLE"/macos/*.app 2>/dev/null || true
   echo ""
   echo "ℹ️  Unsigned local builds are blocked by Gatekeeper on first launch."
-  echo "   Right-click the app → Open, or run: xattr -cr /Applications/LangHire.app"
+  echo "   Right-click the app → Open, or run: xattr -cr /Applications/ApplyQueue.app"
 else
   ls -1 "$BUNDLE"/deb/*.deb 2>/dev/null || true
   ls -1 "$BUNDLE"/appimage/*.AppImage 2>/dev/null || true

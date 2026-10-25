@@ -1,6 +1,6 @@
 {
   "title": "Guia",
-  "subtitle": "Aprenda a usar o LangHire e consulte a qualquer momento",
+  "subtitle": "Aprenda a usar o ApplyQueue e consulte a qualquer momento",
   "howItWorks": { "title": "Como funciona", "steps": { "profile": "Perfil", "aiSetup": "Config. AI", "collect": "Coletar", "apply": "Candidatar", "learn": "Aprender", "improve": "Melhorar" }, "pipelineDescription": "Configurar perfil → Configurar AI → Coletar vagas do LinkedIn → Agente se candidata automaticamente → Aprende de cada execução → Melhora com o tempo" },
   "checklist": { "title": "Lista de verificação", "refreshStatus": "Atualizar status", "allDone": "Todos os passos obrigatórios estão completos! Você está pronto.", "configureAi": "Configurar provedor AI", "setResume": "Definir caminho do currículo", "setupProfile": "Configurar seu perfil", "optional": "(opcional)", "setUp": "Configurar →" },
   "stepByStep": { "title": "Guia passo a passo" },

@@ -29,9 +29,10 @@ export function Backends() {
             {b.id === "local" && (
               <>
                 <ul className="muted">
-                  <li>Detect installed runtimes (Ollama, LM Studio, llama-server)</li>
-                  <li>Recommend a vision-capable model that fits your RAM/VRAM</li>
-                  <li>One-click model download</li>
+                  <li>Detects Ollama (:11434), LM Studio (:1234), llama-server (:9931 / :8080), or any OpenAI-compatible URL</li>
+                  <li>Recommends a vision model that fits your GPU memory, e.g. Qwen3.5 4B (under 6 GB), Qwen3-VL 8B (8–16 GB), Qwen3.6 27B (24 GB+)</li>
+                  <li>One-click download, including Hugging Face GGUF models</li>
+                  <li>Honest expectations: slower than cloud, needs a decent GPU or Apple silicon, best run overnight</li>
                 </ul>
                 <button disabled>Detect local runtimes</button>
               </>
@@ -40,7 +41,8 @@ export function Backends() {
           </div>
         ))}
       </div>
-      <Todo milestone="M5/M6">Backend adapters, local runtime detection, model recommender, and the in-app agent runner.</Todo>
+      <Todo milestone="M8">Local runtime detection, model recommender, one-click download, and the in-app agent runner.</Todo>
+      <Todo milestone="M9">Cloud backend adapters and setup prompts.</Todo>
     </Page>
   );
 }

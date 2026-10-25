@@ -13,7 +13,7 @@ export function Tracker() {
           </div>
         ))}
       </div>
-      <Todo milestone="M7">Email classifier moves cards automatically (confirmation, assessment, interview, rejection).</Todo>
+      <Todo milestone="M5/M7">Email classifier moves cards automatically (confirmation, assessment, interview, rejection).</Todo>
     </Page>
   );
 }

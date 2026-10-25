@@ -13,7 +13,7 @@ export function Settings() {
         <li>Limits: daily cap, per-site pacing</li>
         <li>Recruiter outreach drafts: <strong>off</strong> by default; drafts only, never sent without your approval</li>
       </ul>
-      <Todo milestone="M4–M9">Settings are wired as each subsystem lands.</Todo>
+      <Todo milestone="M4–M11">Settings are wired as each subsystem lands.</Todo>
     </Page>
   );
 }

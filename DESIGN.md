@@ -52,6 +52,7 @@ userData/
   config/answers.json        # answer bank (learned + user-confirmed)
   config/knowledge.json      # projects, experience, essays ingredients
   config/accounts.json       # portal/email account METADATA (no secrets)
+  config/queues.json         # saved searches ("queues"), each with its own mode and filters (8.3)
   documents/                 # resumes, transcript (copied in by the user)
   browser/<profile-id>/      # persistent Chromium profile(s) for the agent
   state/                     # local cache of the sync repo (section 6)
@@ -110,6 +111,23 @@ validated with Ajv/Zod at load and in the wizard):
                "rules": [ { "match": { "titleRegex": "analyst" }, "resumeId": "analyst" } ], "default": "primary" } }
 ```
 
+```jsonc
+// queues.json  (a queue = a saved search the agents work through)
+{ "queues": [ { "id": "q-analyst-remote", "name": "Data analyst, remote",
+    "titles": ["data analyst", "business intelligence analyst"],    // required
+    "locations": ["remote", "US:*"],                                 // required
+    "filters": { "roleType": "full-time", "seniority": ["entry", "junior"], "postedWithinDays": 14,
+                 "salaryFloor": null, "include": [], "exclude": ["senior"] },   // optional
+    "excludeCompanies": ["Example Corp"],                            // optional
+    "boards": ["greenhouse", "lever", "ashby", "linkedin"],          // optional; default = all enabled sources
+    "mode": "review-first",                                          // review-first | automatic
+    "resumeId": null,                                                // null = use resume routing rules
+    "dailyCap": 25, "paused": false } ] }
+```
+
+Quick start (8.1) writes a single queue from just titles + locations; everything else falls
+back to defaults and the categories/answers in `preferences.json` / `answers.json`.
+
 Derivation layer: answers like "Need sponsorship now or later" or availability dates are
 **derived** from `workAuth`/`term` at runtime (no duplicated strings), and the loader
 flags answer-bank entries that contradict structured facts (e.g. a company-specific
@@ -162,7 +180,7 @@ them with zero setup. The local store is secondary:
   which types the value into the page from the app or worker, so the model never sees it.
   Setup prompts reference `credentials/portals.json` by path, never by value.
 - Decision (maintainer): no external password manager in v1. 1Password / Bitwarden integration is
-  a post-v1 milestone (MILESTONES M11).
+  a post-v1 milestone (MILESTONES M13).
 
 ## 4. Agent backends (who drives the browser)
 
@@ -171,7 +189,7 @@ All backends share one contract, so adding one is an adapter, not a fork.
 
 ```ts
 interface AgentBackend {
-  id: "grok-bot" | "chatgpt" | "claude" | "cursor" | "local" | "custom-mcp";
+  id: "grok-bot" | "chatgpt" | "claude" | "gemini" | "cursor" | "local" | "custom-mcp";
   capabilities(): {
     alwaysOn: boolean;          // keeps running with the user's computer off
     computerControl: "own-cloud-browser" | "client-executed" | "user-browser" | "local-playwright" | "none";
@@ -185,8 +203,9 @@ interface AgentBackend {
 ```
 
 Every backend gets the same contract: the **ApplyQueue MCP server** (next_job, skip_job,
-finish_job, get_answer, report_unanswered, fill_secret, get_email_code, label_confirmation,
-log_search_coverage) plus a browser (the backend's own computer/browser control, or the
+finish_job, get_answer, report_unanswered, fill_secret, save_credential, save_session,
+get_email_code, label_confirmation, log_search_coverage, and the browser/form tools; full
+interface in 4.5) plus a browser (the backend's own computer/browser control, or the
 app's CDP/Playwright MCP) and a generated system prompt (the core rules in section 9). The
 backend never sees the DB, git internals, or secrets. When a backend cannot reach the local
 MCP server (cloud-only products), it works through the **private sync repo** (section 6)
@@ -205,9 +224,15 @@ authenticated HTTPS MCP endpoint the user opts into (tunnel; off by default).
 | Claude Code CLI / Desktop scheduled tasks [A2][A3] | No: needs the machine on (Desktop tasks need the app open; `/loop` is one session) | Yes: via the app's Playwright/CDP MCP on a persistent signed-in profile | Yes (local) | Direct: the app writes `.mcp.json` / `claude mcp add` | Claude subscription or API key |
 | Claude API computer use / browser use [A4][A5][A6] | Only if the app's worker host is always-on | Yes: `computer_toolset_20260801` and `browser_toolset_20260801` (GA); the client (our app) executes actions | App scheduler | Direct: API key in the vault; the app runs the agent loop | Pay per token; not available in Claude Managed Agents |
 | Claude in Chrome [A7] | No: user's Chrome must be open | Yes: the user's own Chrome with existing logins; classifier auto-approval | Its own scheduled shortcuts only | Setup prompt (paste rules + queue link) | Paid Claude plans |
+| **Gemini API computer use** [G1][G2][G3] | Only if the app's worker host is always-on | Yes: `computer_use` tool, `environment: "browser"`; the client (our app) executes actions with Playwright in a screenshot loop. Gemini 4 also supports mobile/desktop environments. A `safety_decision` of `require_confirmation` is routed to the user | App scheduler | Direct: API key in the vault; the app runs the agent loop (4.5) | Preview; pay per token. Models: Gemini 3.8 Flash, 3.5 Flash-Lite, Gemini 4 (Vertex lists 4 Argon, 3.5-3.8 Flash) |
+| **Gemini app tasks + schedules** [G4][G5][G6] | Partly: the remote cloud browser runs unattended; tasks on local Chrome need the computer awake | Yes: local Chrome or a remote cloud browser; sign-in steps pause for user takeover; Google advises not to put sign-in info in the task thread | Yes: time-based or "when an email arrives" triggers; up to 10 active schedules | Setup prompt + sync repo | Google AI Pro/Ultra, personal Google account |
+| Chrome auto browse (Gemini in Chrome) [G7] | No: the user's Chrome must be open | Yes: the user's own Chrome with existing logins; asks for confirmation on sensitive steps | Not on its own; pair with Gemini app schedules | Setup prompt (paste rules + queue link) | US, 18+, AI Pro (20 tasks/day) or Ultra (200 tasks/day) |
+| Gemini CLI [G8][G9][G10][G11] | No: needs the machine (or a VPS) on | Yes: via the app's Playwright/CDP MCP | App scheduler runs `gemini -p ... --output-format json` headless | Direct: the app writes `mcpServers` into `~/.gemini/settings.json`; headless runs need `mcp.autoAllowInHeadless: true` and a trusted folder (`--skip-trust` / `GEMINI_CLI_TRUST_WORKSPACE`) | Google account or Gemini API key |
 | **Cursor** Automations / cloud agents [U1][U2] | Yes: cloud agents | Yes: computer use on by default in cloud agents | Yes: cron or event triggers | Setup prompt + sync repo, or Cursor CLI/IDE agent with local MCP | Cursor plan. **The OSS project's own development must not depend on Cursor cloud agents;** users may still pick Cursor as their backend |
-| **Local: Ollama** [L1][L2][L3] | Only if the user's machine/VPS is always-on | Yes: app-run Playwright + vision-model loop (Qwen3-VL via Ollama >= 0.12.7; or browser-use with Ollama) | App scheduler | Direct: `http://127.0.0.1:11434` | Free; needs a GPU or Apple silicon for usable speed; weakest on messy forms |
-| **Local: Hugging Face** [L4] | Same as Ollama | Yes: same loop with UI-TARS-1.5-7B or Qwen3-VL served by transformers / vLLM / TGI (or an HF Inference Endpoint) | App scheduler | Direct: OpenAI-compatible local endpoint URL | Free locally, or HF endpoint billing |
+| **Local: Ollama** [L1][L5][L17] | Only if the user's machine/VPS is always-on | Yes: the in-app runner (4.5) with a local vision model (Qwen3-VL, Qwen3.5/3.6, Gemma 4) | App scheduler | Direct: `http://127.0.0.1:11434` (native API + OpenAI-compatible `/v1`) | Free; needs a GPU or Apple silicon for usable speed; best run overnight (4.6) |
+| **Local: LM Studio / any OpenAI-compatible server** [L14] | Same as Ollama | Yes: same runner | App scheduler | Direct: `http://127.0.0.1:1234/v1` by default, or any user-entered OpenAI-compatible URL (vLLM, TGI, LocalAI, ...) | Free |
+| **Local: llama.cpp `llama-server`** [L15][L11] | Same as Ollama | Yes: same runner; vision via a GGUF + `mmproj` projector (e.g. UI-TARS-1.5-7B) | App scheduler | Direct: OpenAI-compatible `/v1/chat/completions`; current default port 9931 (8080 in older docs and Docker examples) | Free |
+| **Local: Hugging Face models** [L4][L10][L16] | Same as Ollama | Yes: GGUF repos run through Ollama (`ollama run hf.co/{user}/{repo}`) or llama-server; full-precision models via transformers / vLLM / TGI behind an OpenAI-compatible URL (or an HF Inference Endpoint) | App scheduler | Direct: one of the endpoints above | Free locally, or HF endpoint billing |
 | Custom MCP client (any) | Depends | Via the app's browser MCP | App scheduler | Direct: stdio or authenticated HTTP MCP | Escape hatch for future agents |
 
 Retired, do not target: **ChatGPT agent mode** ("no longer available", replaced by ChatGPT
@@ -236,9 +261,15 @@ mode, site gone) [C8].
 
 ### 4.3 Recommendation and where it runs
 
-v1 order: **Grok Bot** (recommended default) -> Claude Code (local CLI, direct) -> ChatGPT
-Work (setup prompt) -> Claude API computer/browser use -> local Ollama/HF loop ->
-Cursor/Codex/Claude cloud scheduled tasks (setup prompt). All ship behind the same interface;
+Two headline paths, shown side by side in onboarding and the README:
+- **Grok Bot (recommended):** always-on, nothing to keep running at home.
+- **Run 100% locally, no subscription:** the in-app runner plus a local vision model the app
+  detects or downloads for you (4.6). Free and private; slower, needs a decent GPU, best run
+  overnight.
+
+v1 order after those: Claude Code (local CLI, direct) -> ChatGPT Work (setup prompt) ->
+Claude / Gemini / OpenAI API computer use through the in-app runner -> Gemini app tasks,
+Cursor, Codex, Claude cloud scheduled tasks (setup prompt). All ship behind the same interface;
 order only sets polish and docs priority.
 
 Where it runs (shown in the wizard):
@@ -268,10 +299,116 @@ Where it runs (shown in the wizard):
 - [A7] https://claude.com/resources/articles/claude-in-chrome-generally-available
 - [U1] https://cursor.com/docs/cloud-agent/automations
 - [U2] https://cursor.com/changelog/06-18-26
+- [G1] https://ai.google.dev/gemini-api/docs/computer-use
+- [G2] https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/computer-use
+- [G3] https://github.com/google-gemini/computer-use-preview (reference client: Playwright or Browserbase)
+- [G4] https://support.google.com/gemini/answer/17094710 (Gemini app tasks)
+- [G5] https://support.google.com/gemini/answer/17094507 (task schedules, email triggers)
+- [G6] https://support.google.com/gemini/answer/16316416 (scheduled actions limits)
+- [G7] https://support.google.com/gemini/answer/16821166 (Chrome auto browse)
+- [G8] https://google-gemini.github.io/gemini-cli/docs/get-started/configuration.html
+- [G9] https://google-gemini.github.io/gemini-cli/docs/cli/headless.html
+- [G10] https://github.com/google-gemini/gemini-cli/pull/27215 (`mcp.autoAllowInHeadless`)
+- [G11] https://geminicli.com/docs/cli/trusted-folders/
 - [L1] https://ollama.com/library/qwen3-vl
 - [L2] https://github.com/benbroks/Qwen3-ComputerUse (Playwright + Ollama loop)
 - [L3] https://github.com/browser-use/web-ui
 - [L4] https://github.com/bytedance/ui-tars
+- [L5] https://ollama.com/library/gemma4
+- [L6] https://ollama.com/library/qwen3.6
+- [L7] https://ollama.com/library/qwen3.5
+- [L8] https://ollama.com/library/gemma3
+- [L9] https://www.reddit.com/r/LocalLLaMA/comments/1ubx4rw (community VLM benchmark, 2026-06-21; community data, not vendor claims)
+- [L10] https://huggingface.co/ByteDance-Seed/UI-TARS-1.5-7B
+- [L11] https://huggingface.co/Mungert/UI-TARS-1.5-7B-GGUF
+- [L12] https://github.com/bytedance/UI-TARS-desktop
+- [L13] https://ollama.com/ahmadwaqar/smolvlm2-agentic-gui ; https://ollama.com/ahmadwaqar/gui-owl (community uploads, unverified)
+- [L14] https://lmstudio.ai/docs/developer/openai-compat
+- [L15] https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md
+- [L16] https://huggingface.co/docs/hub/ollama
+- [L17] https://github.com/ollama/ollama/blob/main/docs/faq.md
+
+### 4.5 Shared tool layer (ApplyQueue MCP server) and the in-app agent runner
+
+Local and cloud backends drive **the same tools**. The app's main process owns them and
+exposes them two ways: as an **MCP server** (stdio for local clients such as Claude Code,
+Gemini CLI, Codex, Cursor CLI; streamable HTTP on 127.0.0.1 with a per-client bearer token;
+remote access only through an opt-in authenticated tunnel or the sync-repo worker), and as
+in-process functions for the **in-app runner**. One implementation, so a fix or a new ATS
+quirk helps every backend.
+
+| Group | Tools | Notes |
+| --- | --- | --- |
+| Queue | `next_job(queueId?)` -> job + claim token; `skip_job(token, reason)`; `finish_job(token, outcome, evidence?)` | Claims are locked (local SQLite + sync-repo lock with TTL). `finish_job("submitted")` parks the job as `pending-proof` until a confirmation email matches (core rule 3). |
+| Answers | `get_answer(question, fieldType, options?)` -> `{answer, source}` or `unknown`; `report_unanswered(question, context)` | Answer bank, then derived facts, then a truthful composition from profile/knowledge; never invents (section 9). |
+| Secrets | `fill_secret(elementRef, ref)`; `save_credential(portal, username, generate?)`; `save_session(portal)` | Values never return to the model. Writes go to the private sync repo after the visibility check (6.2), then the vault mirror. |
+| Email | `get_email_code(portal, since)`; `label_confirmation(jobKey)` | Reads OTPs; labels and archives confirmation and verification mail (core rule 4). |
+| Search | `log_search_coverage(lane, stats)` | Makes "exhaustive" checkable. |
+| Browser | `browser.navigate`, `browser.snapshot` (accessibility tree with stable element refs), `browser.screenshot`, `browser.click(ref or x,y)`, `browser.type`, `browser.select`, `browser.upload(ref, documentId)`, `browser.scroll`, `browser.wait`, `browser.tabs` | Playwright over CDP on the persistent agent profile (3.1). `upload` resolves a resume id to a file path inside the app; the model never handles paths. |
+| Forms | `form.fields()` -> labelled fields with types, options, required flags; `form.fill(mapping)` | DOM-first path: lets text-only or small models fill forms without pixel clicking. |
+| Outreach | `draft_outreach(jobKey)` | Disabled unless the user enables outreach; creates a draft only (8.6). |
+
+**In-app agent runner** (for API keys and local models; subscription products bring their own
+loop and only call the tools):
+
+1. `next_job`, open the posting, `browser.snapshot` + `form.fields()`; add a screenshot only
+   when the model is vision-capable and the DOM is not enough (canvas widgets, custom
+   dropdowns, CAPTCHAs that need the user).
+2. Send the observation and the tool list to the model: OpenAI-compatible chat completions
+   with tools (Ollama, LM Studio, llama-server, vLLM, OpenAI), or the vendor's native
+   computer-use API (Claude computer/browser toolsets, Gemini `computer_use`) whose actions
+   are mapped onto the `browser.*` primitives.
+3. Execute the chosen tool, append the result, repeat. Step budget per job, per-domain pacing,
+   per-job timeout, checkpoint after each page so a crash resumes instead of re-submitting.
+4. Known ATS adapters (Greenhouse, Lever, Ashby, Workday) fill deterministically from
+   `form.fields()` + `get_answer`; the model handles only the unusual questions. This is what
+   makes small local models practical.
+5. Safety gates: final submit requires `mode: automatic` on the queue (otherwise the job waits
+   in review), vendor confirmation requests (Gemini `require_confirmation`, Claude/Chrome
+   prompts) surface to the user, and the runner stops on CAPTCHAs for a human.
+
+### 4.6 Local models: detection, recommender, one-click download, honest expectations
+
+**Detection** (Settings > AI backends > Local, and onboarding step 3):
+- Probe, on 127.0.0.1 only: Ollama `:11434` (`/api/version`, `/api/tags`, `/api/show` for
+  model capabilities such as vision) [L17]; LM Studio `:1234/v1/models` [L14]; llama-server
+  `:9931` and `:8080` `/v1/models` [L15]; plus any user-entered OpenAI-compatible URL.
+- Binaries on PATH and default install locations: `ollama`, `lms`, `llama-server`.
+- Hardware: NVIDIA VRAM via `nvidia-smi`, AMD via `rocm-smi`, Apple silicon unified memory via
+  total RAM, else Electron `app.getGPUInfo("complete")`; CPU-only is allowed but flagged.
+
+**Recommender** (picks the largest vision model that fits; sizes are download sizes of the
+default 4-bit quantizations unless noted; the rule of thumb is model size + 2-4 GB for
+context, KV cache, and image tokens <= free VRAM, or about 70% of unified memory on Apple
+silicon; heuristic, tuned in M8):
+
+| Free VRAM / unified memory | First pick | Alternatives | Sources |
+| --- | --- | --- | --- |
+| CPU only or under 6 GB | `qwen3.5:4b` (3.3-4.0 GB) | `qwen3-vl:4b` (3.3 GB), `qwen3-vl:2b` (1.9 GB) | [L7][L1][L9] |
+| 8-12 GB | `qwen3-vl:8b` Q4 (6.2 GB) | UI-TARS-1.5-7B GGUF q4_k_m 4.78 GB + mmproj 853 MB via llama-server; `gemma4:e4b` (6.6-9.5 GB) | [L1][L10][L11][L5] |
+| 12-16 GB | Qwen3-VL 8B at Q8 (8.1 GB, the community benchmark's pick for this tier) | `gemma4:12b` (7.7-8 GB), `gemma3:12b` | [L9][L5][L8] |
+| 24 GB+ | `qwen3.6:27b` (18-19 GB; community benchmark pick at Q4 with thinking off) | `gemma4:26b` MoE A4B (16-19 GB), `qwen3-vl:30b` (20 GB), `gemma4:31b` (19-20 GB) | [L6][L9][L5][L1] |
+| 32-48 GB | `qwen3.6:35b` (23-24 GB) | `qwen3-vl:32b` (21 GB), `qwen3.5:35b` (22 GB) | [L6][L1][L7] |
+
+Model notes: run vision steps with thinking off (the community benchmark found thinking hurts
+vision accuracy) [L9]; Gemma 4 needs a larger image token budget [L9]; UI-TARS-1.5-7B is a
+GUI-agent specialist (OSWorld 27.5, ScreenSpot-Pro 49.6 per its model card) [L10]; community
+GUI models such as `ahmadwaqar/smolvlm2-agentic-gui` and `ahmadwaqar/gui-owl` are listed as
+experimental, unverified uploads [L13]. Models with 256K context (Qwen3-VL, Qwen3.5) fit long
+application pages [L1][L7].
+
+**One-click download:** Ollama `POST /api/pull` with streamed progress; LM Studio `lms get`;
+llama-server: download GGUF + `mmproj` from Hugging Face over HTTPS with size/hash checks;
+Hugging Face GGUF repos through `ollama pull hf.co/{user}/{repo}` [L16]. If no runtime is
+installed, the app links to the official Ollama installer (it does not bundle runtimes).
+Downloads show size and disk space first and are resumable.
+
+**Honest expectations** (shown before the user picks Local): slower than cloud agents
+(minutes per application rather than seconds per step); needs a decent GPU or Apple silicon
+for usable speed; best run overnight with the computer plugged in (`powerSaveBlocker`, quiet
+hours); smaller models handle known ATS forms well through the DOM-first path but struggle
+with unusual widgets, so those jobs are parked for review instead of guessed. No data leaves
+the machine except the applications themselves.
 
 ## 5. Durable portal and email linking
 
@@ -311,7 +448,7 @@ Decision (maintainer): **Gmail and Outlook are both v1**; IMAP stays as a fallba
 - **Portals (Workday, iCIMS, Oracle, LinkedIn, Indeed):**
   - Default: credentials and sessions are stored in the user's private sync repo
     (`credentials/`, `sessions/`, `browser-profiles/`, section 6.1) and mirrored in the local
-    vault (3.3). 1Password / Bitwarden integration is a later milestone (MILESTONES M11).
+    vault (3.3). 1Password / Bitwarden integration is a later milestone (MILESTONES M13).
   - Generated strong unique password per tenant at account creation, written to
     `credentials/portals.json` and committed; typed by `fill_secret` so the model never sees it.
   - "Sign in with Google/Microsoft" preferred where the portal supports it.
@@ -324,7 +461,7 @@ Sources: [G1] https://support.google.com/cloud/answer/10311615 ;
 
 Decision (maintainer, confirmed): the state repo is a **private repo created in the user's own
 GitHub account through the user's own GitHub login**. The project never hosts user data.
-Auth, in order of preference (verify exact permission names when building M8):
+Auth, in order of preference (verify exact permission names when building M10):
 1. **GitHub App** published by the project, using its **user-to-server device flow**: the
    app shows a code, the user approves on github.com, the app gets an expiring, refreshable
    user token limited to the App's permissions (repo Administration to create, Contents
@@ -454,30 +591,80 @@ Each node shows counts and health (e.g. "Discover: 312 boards, 41 new today, Lin
 count?"), the rules in force, and the underlying records. A "What happens to my data" panel
 shows exactly which files live locally, in the keychain, and in the sync repo.
 
-## 8. Onboarding wizard (non-technical users)
+## 8. Onboarding and everyday UX (non-technical users)
 
-1. Welcome + what the app will and will not do (submits as you, truthfully; you can pause).
-2. Import: drop resume PDF(s) / LinkedIn profile PDF; the configured AI fills profile,
-   education, knowledge; user confirms each field (green check UI).
-3. Work authorization: plain questions per country, generating structured `workAuth`.
-4. Voluntary EEO: choose answer or "Decline to self-identify" (explicit choice required).
-5. What jobs: any field. Role type, term/dates, categories (start blank or from a starter
-   pack such as "Software intern", "Hardware internships", "Nursing new-grad"; every keyword
-   is editable), locations, banned companies/industries, answer bank.
-6. Resumes and routing: upload variants, simple rules ("titles containing PCB -> PCB resume").
-7. Email: connect Gmail/Outlook (OAuth) or IMAP; choose label name; test (send self a sample,
-   label + archive it).
-8. Portals: sign in to LinkedIn/Indeed in the agent browser. Passwords and sessions are
-   saved to the private sync repo (after the privacy warning and visibility check, 6.2) and
-   mirrored locally; or pick "this device only".
-9. AI backend: pick from the matrix in section 4.1 (Grok Bot preselected as recommended);
-   direct backends sign in here, subscription backends get a generated setup prompt with a
-   copy button; choose where it runs (VPS, spare computer, overnight); dry run (fill but
-   don't submit one posting).
-10. Sync (recommended, needed for credential sharing): "Sign in with GitHub" (device flow),
-    auto-create a **private** state repo in the user's own account, show the "must stay
-    private" notice, verify visibility.
-11. Review answer bank (top 50 common questions pre-filled) and limits; start.
+UX reference: hosted auto-apply services (for example LoopCV) were reviewed for interaction
+patterns only; no branding, text, or assets are copied.
+
+### 8.1 Quick start: three steps
+
+1. **Upload your resume.** The chosen AI (or the local model) pre-fills the profile; the user
+   confirms each field (green check UI).
+2. **Pick job titles and locations.** Everything else is optional.
+3. **Press Start.** Creates the first queue in **review-first** mode. The same screen shows
+   "Who does the work?" with two first-class choices, **Grok Bot (recommended)** and **Run
+   100% locally (free, no subscription)**, plus "other AI" (ChatGPT, Claude, Gemini, Cursor).
+   Picking Local runs detection and the recommender (4.6) inline.
+
+### 8.2 Progressive setup (optional, offered when it first matters)
+
+The former 11-step wizard becomes a checklist the app surfaces at the right moment, never a
+wall of forms:
+- Answer bank review (top 50 common questions pre-filled) when the first unknown question appears.
+- Work authorization (plain questions per country -> structured `workAuth`) before the first
+  application that asks.
+- Voluntary EEO choice per question type (an answer or "Decline to self-identify"; a choice is
+  always made).
+- Categories and starter packs (any field; every keyword editable), banned companies/industries.
+- Resumes and routing (8.5).
+- Email: connect Gmail/Outlook (OAuth) or IMAP; choose a label; test with a sample mail. Needed
+  for "confirmed" status, so offered before switching a queue to automatic.
+- Portals: sign in to LinkedIn/Indeed etc. in the agent browser; passwords and sessions go to
+  the private sync repo after the privacy warning and visibility check (6.2), mirrored
+  locally; or "this device only".
+- AI backend details and where it runs (4.3); dry run (fill but don't submit one posting).
+- Sync: "Sign in with GitHub" (device flow), auto-create a **private** state repo, verify
+  visibility. Needed for more than one agent and for credential sharing.
+
+### 8.3 Queues (saved searches)
+
+A queue = titles, locations, optional filters (role type, seniority, posted within, salary
+floor when posted, include/exclude keywords), excluded companies, and boards (schema in
+section 2). Each queue has:
+- **Mode toggle:** *review-first* (default; matches wait for the user's approve/skip, in bulk
+  or one by one) or *fully automatic* (the agent submits within limits). Automatic requires a
+  connected email so submissions can be confirmed.
+- **Stats page:** found, applied, skipped (with reasons), confirmed (real email proof),
+  interviews, plus response rate and a 30-day trend. Numbers come from the ledger, never
+  from agent self-reports.
+- Pause/resume, daily cap, and a coverage view (which boards and pages were searched).
+
+Queues map onto the ranking engine: the queue's titles become a category, its locations a
+location gate, and its exclusions merge with global bans.
+
+### 8.4 Application tracker
+
+One dashboard across all queues with columns *Applied (pending proof) -> Confirmed ->
+Assessment -> Interview -> Offer*, plus *Rejected* and *Needs you* (unanswered questions,
+follow-up tasks, sign-in prompts). Cards move automatically from the ledger and the email
+classifier (confirmation, assessment invite, interview scheduling, rejection); the user can
+drag to correct, which feeds the classifier's tests. Export to CSV.
+
+### 8.5 Multiple resumes
+
+- **Routing:** per category or per queue ("titles containing PCB -> PCB resume"), with a default.
+- **A/B analytics:** response rate (assessment, interview) per resume variant, with counts and
+  a "not enough data yet" guard instead of over-claiming significance.
+- **ATS keyword check:** compare a resume against a posting or a whole queue; show missing
+  and matched keywords. It suggests; it never rewrites the resume with claims the user did
+  not make (core rule 2).
+
+### 8.6 Recruiter outreach (off by default)
+
+Disabled by default. When enabled, the agent may write a short note to a recruiter or hiring
+manager after applying, saved as a **draft** in the user's mailbox or in the app. Nothing is
+ever sent automatically; the user reviews and sends each one. Drafts use only facts from the
+profile.
 
 ## 9. Core rules (product invariants, injected into every agent prompt and enforced by tools)
 
@@ -495,6 +682,10 @@ shows exactly which files live locally, in the keychain, and in the sync repo.
 7. CAPTCHAs: solve only as a human would in the visible browser; no solving services or
    token forgery.
 8. Search lanes report coverage (pages seen, queries run) so "exhaustive" is checkable.
+9. Queues in review-first mode never submit without the user's approval; automatic mode
+   respects caps and pacing.
+10. Recruiter outreach is off by default and is drafts only; nothing is sent without the
+    user's explicit approval.
 
 ## 10. Grok Bot users (recommended backend)
 
@@ -519,7 +710,9 @@ ApplyQueue/            # public: github.com/JonathanLiu1401/ApplyQueue
   packages/schema/         # JSON Schemas + zod types for config + ledger
   packages/mcp-server/     # ApplyQueue MCP server (stdio + optional authenticated HTTP)
   packages/sources/        # Greenhouse, Ashby, Lever, Workday CXS, SmartRecruiters, ... (public data)
-  packages/backends/       # grok-bot, chatgpt, claude, cursor, local (ollama, hf), custom-mcp
+  packages/backends/       # grok-bot, chatgpt, claude, gemini, cursor, local, custom-mcp
+  packages/runner/         # in-app agent runner (OpenAI-compatible + native computer-use adapters)
+  packages/local/          # local runtime detection, hardware probe, model recommender, downloads
   packages/prompts/        # setup-prompt generator shared by subscription backends
   packages/email/          # gmail, graph (outlook), imap, re-auth notifier
   catalog/companies.json   # community-maintained company -> ATS board map (no personal notes)
@@ -600,6 +793,9 @@ Resolved by the maintainer on 2026-10-24:
 | Email | Gmail + Outlook (Graph) in v1; 7-day Google Testing-mode re-auth accepted with one-click renew |
 | Portal logins + sessions | Default home is the user's private sync repo (`credentials/`, `sessions/`, `browser-profiles/`); local safeStorage vault is a mirror or opt-in local-only mode; app verifies the repo is private before writing; 1Password/Bitwarden later |
 | Secrets in public repo | Never; gitleaks + personal-data scan in CI on the public repo |
+| UX | Three-step quick start (resume, titles + locations, Start); deeper setup is progressive; queues with per-queue review-first/automatic mode and stats; tracker; multiple resumes with routing, A/B, keyword check (8.1-8.5) |
+| Outreach | Off by default; drafts only; never auto-sent (8.6) |
+| Local models | Headline "run 100% locally, no subscription" path next to the Grok Bot recommendation; Ollama, LM Studio / OpenAI-compatible, llama-server, Hugging Face; detection + recommender + in-app runner get their own milestone (4.5, 4.6, MILESTONES M8) |
 
 Still open: encrypting repo credentials (6.3, option only); TS port vs Python sidecar (TS recommended); whether sync
 also supports non-GitHub remotes in v1 (recommend: local folder + GitHub only).

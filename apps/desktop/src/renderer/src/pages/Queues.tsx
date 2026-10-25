@@ -32,7 +32,7 @@ export function Queues() {
         </tbody>
       </table>
       <button disabled>New queue</button>
-      <Todo milestone="M3">Queue editor and persistence.</Todo>
+      <Todo milestone="M7">Queue editor and persistence.</Todo>
     </Page>
   );
 }
@@ -63,7 +63,7 @@ export function QueueDetail({ id }: { id: string }) {
         <h2>Search</h2>
         <p className="muted">Titles · locations · filters (seniority, term, salary floor) · excluded companies · boards</p>
       </div>
-      <Todo milestone="M3/M7">Stats come from the ledger; "Confirmed" requires a real confirmation email.</Todo>
+      <Todo milestone="M7">Stats come from the ledger; "Confirmed" requires a real confirmation email.</Todo>
       <p>
         <a href={href("queues")}>← All queues</a>
       </p>

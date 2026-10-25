@@ -21,7 +21,7 @@ export function Resumes() {
           <p className="muted">Compare a posting with a resume: matched and missing keywords. Suggestions only; never invents experience.</p>
         </div>
       </div>
-      <Todo milestone="M8">Resume routing, analytics, and keyword checker.</Todo>
+      <Todo milestone="M7">Resume routing, analytics, and keyword checker.</Todo>
     </Page>
   );
 }

@@ -1,11 +1,12 @@
 # MILESTONES: v1 plan
 
 Assumes 1 to 2 developers plus agents; durations are rough. Each milestone ends with a demo
-and a tagged pre-release. Public repo: github.com/JonathanLiu1401/ApplyQueue. Project
+and a tagged pre-release. Repo: github.com/JonathanLiu1401/ApplyQueue (**private until the
+publish gate below is passed**). Project
 development never uses Cursor cloud agents. Each milestone M2-M13 has a tracking issue.
 
-## M0. Decisions + public repo (week 0-1) - done
-- Decided 2026-10-24 (DESIGN 16): public repo under `JonathanLiu1401`; MIT license; all
+## M0. Decisions + repo (week 0-1) - done
+- Decided 2026-10-24 (DESIGN 16): repo under `JonathanLiu1401`, private until the publish gate; MIT license; all
   backends supported, Grok Bot recommended, local models as the headline no-subscription path;
   private sync repo via the user's own GitHub login (GitHub App device flow); any job domain;
   Gmail + Outlook with 7-day Google re-auth accepted; safeStorage vault in v1.
@@ -26,6 +27,12 @@ development never uses Cursor cloud agents. Each milestone M2-M13 has a tracking
   compaction, confirmation classifier, resume routing); golden tests with the fictional
   "Alex Example" persona; `applyqueue import-legacy` converter (local only).
 - Exit: `pnpm test` green on 3 OSes; legacy import reproduces the existing queue counts.
+
+## Publish gate (before the repo goes public)
+- Build and run a full end-to-end test suite (app shell, schema, privacy/secret scans,
+  packaging on 3 OSes, and the flows that exist at that point) and write a test report.
+- The maintainer reviews the report and explicitly approves; only then is visibility
+  switched to public. Until then all pushes go to the private repo.
 
 ## M2. Sources (weeks 2-4)
 - Greenhouse, Ashby, Lever, Workday CXS, SmartRecruiters adapters (public JSON); GitHub

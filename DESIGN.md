@@ -785,7 +785,7 @@ Resolved by the maintainer on 2026-10-24:
 
 | Topic | Decision |
 |---|---|
-| Repo | Public: `JonathanLiu1401/ApplyQueue` (name picked from `NAME_SHORTLIST.md`) |
+| Repo | `JonathanLiu1401/ApplyQueue` (name picked from `NAME_SHORTLIST.md`), MIT; **private until full e2e testing and a test report the maintainer reviews**, then public (decided 2026-10-24 22:32 PT) |
 | License | MIT, holder "JobAutomation OSS contributors" |
 | Backends | Support every backend in 4.1; recommend Grok Bot; setup prompt = "login" for subscriptions |
 | Sync | Private repo in the user's own GitHub, via GitHub App device flow (OAuth App device flow fallback) |

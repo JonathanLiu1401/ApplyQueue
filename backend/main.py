@@ -14,6 +14,8 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Optional
 
+_LAUNCH_PPID = os.getppid()  # captured before the slow imports: the window may already be gone later
+
 if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--mcp-server":
     # M3: the ApplyQueue MCP server a subscription CLI (Grok/Cursor/Codex/Claude)
     # starts for one run. Dispatched before the web app is imported so it never
@@ -21,6 +23,16 @@ if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--mcp-server
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from core import mcp_server as _mcp_server
     sys.exit(_mcp_server.main(sys.argv[2:]))
+
+if __name__ == "__main__" and not (len(sys.argv) > 1 and sys.argv[1] == "--self-test"):
+    # M8: a read-only / full / unmounted data dir must fail with one clear line, not a
+    # traceback from the log handler (and never leave the UI waiting on a token).
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from core.config import data_dir_problem as _data_dir_problem
+    _problem = _data_dir_problem()
+    if _problem:
+        print(f"ApplyQueue: {_problem}", file=sys.stderr, flush=True)
+        sys.exit(3)
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -120,15 +132,52 @@ _API_TOKEN = os.environ.get("JOB_APPLICANT_TOKEN") or _secrets.token_hex(32)
 # Write token to data dir so the Tauri frontend can read it
 import stat as _stat
 _token_path = get_data_dir() / ".api_token"
-_token_path.parent.mkdir(parents=True, exist_ok=True)
-_token_path.write_text(_API_TOKEN)
-try:
-    os.chmod(_token_path, _stat.S_IRUSR | _stat.S_IWUSR)
-except OSError as e:
-    _log.warning(f"Could not set restrictive permissions on token file: {e}")
-# Verify token was written correctly
-_written = _token_path.read_text().strip()
-_log.info(f"Token written to {_token_path} (starts with '{_API_TOKEN[:8]}...', verified: {_written == _API_TOKEN})")
+
+
+def _launcher_pid() -> int:
+    """The app window's pid. A PyInstaller onefile build runs as bootloader -> python, so when
+    our parent is the same executable (the bootloader), the window is its parent."""
+    pid = _LAUNCH_PPID
+    if getattr(sys, "frozen", False):
+        try:
+            import psutil
+            parent = psutil.Process(pid)
+            if parent.exe() == psutil.Process().exe():
+                return parent.ppid()
+        except Exception:
+            pass
+    return pid
+
+
+_PARENT_PID = _launcher_pid()
+
+
+def _write_token_file():
+    _token_path.parent.mkdir(parents=True, exist_ok=True)
+    _token_path.write_text(_API_TOKEN)
+    try:
+        os.chmod(_token_path, _stat.S_IRUSR | _stat.S_IWUSR)
+    except OSError as e:
+        _log.warning(f"Could not set restrictive permissions on token file: {e}")
+    _written = _token_path.read_text().strip()
+    _log.info(f"Token written to {_token_path} (starts with '{_API_TOKEN[:8]}...', verified: {_written == _API_TOKEN})")
+
+
+def _orphaned() -> bool:
+    """True when the app window that launched this backend is gone."""
+    try:
+        from core.jobs_store import _pid_alive
+    except ImportError:  # pragma: no cover
+        from backend.core.jobs_store import _pid_alive
+    if _PARENT_PID <= 1:
+        return True
+    return not _pid_alive(_PARENT_PID)
+
+
+# In the sidecar the token is written only after the port is ours (see __main__): a second
+# instance must never overwrite the running instance's token and lock its window out.
+if __name__ != "__main__":
+    _write_token_file()
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
@@ -192,8 +241,11 @@ app.add_middleware(
 # ── Helpers ───────────────────────────────────────────────────────────────
 
 def _start_parent_watchdog():
-    """Exit if the parent process (Tauri app) dies — prevents orphaned sidecar."""
-    parent_pid = os.getppid()
+    """Exit if the parent process (Tauri app) dies — prevents orphaned sidecar.
+
+    Watches the app window, not the PyInstaller onefile bootloader (our direct parent in a
+    packaged build), which outlives a crashed/killed window and kept the sidecar alive (M8)."""
+    parent_pid = _PARENT_PID
     if parent_pid <= 1:
         _log.info(f"Parent watchdog skipped (ppid={parent_pid}, already orphaned or init)")
         return
@@ -215,8 +267,11 @@ def _start_parent_watchdog():
                 if not parent.is_running():
                     break
             else:
-                # Fallback to os.getppid() if psutil fails
-                if os.getppid() != parent_pid:
+                try:
+                    from core.jobs_store import _pid_alive
+                except ImportError:  # pragma: no cover
+                    from backend.core.jobs_store import _pid_alive
+                if not _pid_alive(parent_pid):
                     break
         
         _log.info("Parent process died — shutting down backend")
@@ -283,10 +338,8 @@ def _get_jobs_file() -> Path:
 
 
 def _load_jobs() -> dict:
-    path = _get_jobs_file()
-    if path.exists():
-        return json.loads(path.read_text())
-    return {}
+    from core.config import read_json_file
+    return read_json_file(_get_jobs_file(), {})
 
 
 def _get_memory_store():
@@ -522,6 +575,9 @@ async def health():
     return {
         "status": "ok" if all_ok else "degraded",
         "version": "1.0.0",
+        "app": "applyqueue",
+        "pid": os.getpid(),
+        "orphaned": _orphaned(),
         "frozen": getattr(sys, 'frozen', False),
         "checks": {
             "database": db_ok,
@@ -3061,30 +3117,46 @@ if __name__ == "__main__":
 
     # Use Server directly instead of uvicorn.run() — the latter fails in
     # PyInstaller frozen builds because it can't manage the event loop properly
-    # Check if port is already in use (stale process from previous run)
+    # Port busy? Only an ORPHANED ApplyQueue backend (its window is gone) is replaced. A live
+    # instance (second window, second launch) is left alone; an unknown process is never killed.
     import socket
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        sock.bind(("127.0.0.1", port))
-        sock.close()
-        _log.info(f"Port {port} is available")
-    except OSError as e:
-        _log.error(f"Port {port} already in use: {e}. Killing stale process...")
-        sock.close()
+
+    def _port_free() -> bool:
+        # "is anything listening": a bind probe is fooled by TIME_WAIT sockets of the previous run
         try:
-            import subprocess as _sp
-            result = _sp.run(["lsof", "-ti", f":{port}"], capture_output=True, text=True, timeout=5)
-            if result.stdout.strip():
-                for pid in result.stdout.strip().split("\n"):
-                    _log.info(f"Killing stale process on port {port}: PID {pid}")
-                    try:
-                        os.kill(int(pid), signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                import time
-                time.sleep(1)
-        except Exception as kill_err:
-            _log.warning(f"Could not kill stale process: {kill_err}")
+            with socket.create_connection(("127.0.0.1", port), timeout=2):
+                return False
+        except OSError:
+            return True
+
+    if not _port_free():
+        holder = None
+        try:
+            import urllib.request as _ur
+            with _ur.urlopen(f"http://127.0.0.1:{port}/health", timeout=5) as _r:
+                holder = json.loads(_r.read().decode())
+        except Exception as e:
+            _log.error(f"Port {port} is in use by something that is not answering as ApplyQueue: {e}")
+        if not isinstance(holder, dict) or holder.get("app") != "applyqueue":
+            print(f"ApplyQueue: port {port} is in use by another program; not starting.", file=sys.stderr, flush=True)
+            sys.exit(2)
+        if not holder.get("orphaned"):
+            msg = f"ApplyQueue is already running (backend pid {holder.get('pid')} on port {port}); not starting a second backend."
+            _log.warning(msg)
+            print(f"ApplyQueue: {msg}", file=sys.stderr, flush=True)
+            sys.exit(2)
+        stale = int(holder.get("pid") or 0)
+        _log.warning(f"Replacing orphaned ApplyQueue backend pid {stale} on port {port}")
+        try:
+            os.kill(stale, signal.SIGTERM)
+        except (OSError, ValueError) as kill_err:
+            _log.warning(f"Could not stop orphaned backend: {kill_err}")
+        import time
+        for _ in range(40):
+            if _port_free():
+                break
+            time.sleep(0.25)
+    _write_token_file()
 
     # Ignore SIGHUP — Tauri sidecar may receive it when parent process group changes
     if sys.platform != "win32":

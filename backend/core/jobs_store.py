@@ -44,10 +44,11 @@ def _load(path: Path) -> dict:
 
 
 def _save(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    try:
+        from core.config import atomic_write_text
+    except ImportError:  # pragma: no cover
+        from backend.core.config import atomic_write_text
+    atomic_write_text(path, json.dumps(data, indent=2))
 
 
 def read_jobs() -> dict:

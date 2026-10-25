@@ -97,6 +97,22 @@ def get_data_dir() -> Path:
     return base
 
 
+def data_dir_problem() -> str | None:
+    """Why the data dir cannot be used (None if it can): missing parent, read-only, full."""
+    try:
+        d = get_data_dir()
+    except OSError as e:
+        return f"data directory cannot be created ({e}). Set APPLYQUEUE_DATA_DIR to a writable folder."
+    probe = d / f".write-probe-{os.getpid()}"
+    try:
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+    except OSError as e:
+        return (f"data directory {d} is not writable ({e.strerror or e}). Free disk space or fix its "
+                "permissions, or set APPLYQUEUE_DATA_DIR to a writable folder.")
+    return None
+
+
 def quarantine_corrupt(path: Path, err: Exception) -> None:
     """Move an unreadable JSON file aside (never delete it) so the app can start with defaults."""
     import time as _t
@@ -134,11 +150,24 @@ def _load_json(path: Path, default=None):
     return {} if data is None else data
 
 
-def _save_json(path: Path, data):
+def atomic_write_text(path: Path, text: str) -> None:
+    """tmp + replace. On failure (disk full, read-only) the previous file is untouched and the
+    partial tmp file is removed, then the error propagates."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        tmp.replace(path)
+    except BaseException:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _save_json(path: Path, data):
+    atomic_write_text(path, json.dumps(data, indent=2))
     if any(s in path.name for s in ("llm_settings", "settings")):
         try:
             import os, stat

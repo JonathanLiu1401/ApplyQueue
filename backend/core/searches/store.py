@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 import threading
 import time
 import uuid
@@ -76,6 +77,8 @@ def save(data: dict) -> None:
 # ── validation helpers ───────────────────────────────────────────────────
 def _text(v, limit: int = 100, required: bool = False, field: str = "value") -> str:
     s = " ".join(str(v or "").split())[:limit]
+    if not any(unicodedata.category(c)[0] not in "ZC" for c in s):  # only zero-width/control chars
+        s = ""
     if required and not s:
         raise ValidationError(f"{field} is required")
     return s

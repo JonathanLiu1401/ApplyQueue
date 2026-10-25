@@ -44,16 +44,23 @@ ADA_CMD: tuple[str, ...] = ()  # Only needed for Amazon internal credential refr
 
 # Load settings from OS data dir (written by desktop app UI) if available
 _settings_file = DATA_DIR / "settings.json"
-_ui_settings = json.loads(_settings_file.read_text()) if _settings_file.exists() else {}
+try:
+    from core.config import read_json_file as _read_json_file
+except ImportError:  # pragma: no cover
+    from backend.core.config import read_json_file as _read_json_file
+# corrupt / truncated / wrong-type files are quarantined instead of crashing every import
+_ui_settings = _read_json_file(_settings_file, {})
 # A legacy shared "password" here is moved to the vault at startup (sign-in only).
-SENSITIVE_DATA = _ui_settings.get("sensitive_data", {"email": ""})
+SENSITIVE_DATA = _ui_settings.get("sensitive_data")
+if not isinstance(SENSITIVE_DATA, dict):
+    SENSITIVE_DATA = {"email": ""}
 
 # Fall back to profile email if sensitive_data email is blank
-if not SENSITIVE_DATA.get("email", "").strip():
+if not str(SENSITIVE_DATA.get("email") or "").strip():
     _profile_file = DATA_DIR / "candidate_profile.json"
     if _profile_file.exists():
-        _profile_data = json.loads(_profile_file.read_text())
-        _profile_email = _profile_data.get("email", "").strip()
+        _profile_data = _read_json_file(_profile_file, {})
+        _profile_email = str(_profile_data.get("email") or "").strip()
         if _profile_email:
             SENSITIVE_DATA["email"] = _profile_email
 
@@ -116,10 +123,11 @@ def load_json(path: Path, default=None):
 
 
 def save_json(path: Path, data):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    try:
+        from core.config import atomic_write_text
+    except ImportError:  # pragma: no cover
+        from backend.core.config import atomic_write_text
+    atomic_write_text(path, json.dumps(data, indent=2))
 
 
 def read_jobs() -> dict:

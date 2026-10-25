@@ -2,8 +2,10 @@ name: Integration Tests
 
 # Private-repo Actions minutes are billed per OS (Linux 1x, Windows 2x, macOS 10x), so:
 # - path filters skip this workflow for docs-only changes;
-# - push/PR runs Linux + Windows; macOS runs only on manual dispatch (run_macos=true)
-#   and before a release.
+# - push/PR runs Linux + Windows + Intel macOS (x86_64 is a hard requirement, so the
+#   Intel job builds the packaged app and checks /health on every code change);
+# - Apple Silicon macOS runs only on manual dispatch (run_macos=true) and before a release.
+# "Required checks" aggregates all jobs; branch protection on main requires it.
 on:
   push:
     branches: [main]
@@ -42,7 +44,7 @@ on:
   workflow_dispatch:
     inputs:
       run_macos:
-        description: 'Also run macOS (ARM64 + x64; ~10x minutes)'
+        description: 'Also run macOS ARM64 tests (~10x minutes; Intel always runs)'
         type: boolean
         default: false
 
@@ -60,8 +62,8 @@ jobs:
       include: ${{ steps.m.outputs.include }}
     steps:
       - id: m
-        # macOS x64 is not in the matrix: pymupdf 2.0 -> onnxruntime 1.31 ships no macOS x86_64 wheel.
-        # Re-add {"platform":"macos-15-intel",...,"label":"macOS-x64"} after PyMuPDF is replaced (M2).
+        # Apple Silicon runs only on manual dispatch with run_macos=true (10x minutes).
+        # Intel macOS is covered by the intel-mac job below, which always runs.
         run: |
           base='[{"platform":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu","label":"Linux-x64"},{"platform":"windows-latest","target":"x86_64-pc-windows-msvc","label":"Windows-x64"}'
           mac=',{"platform":"macos-latest","target":"aarch64-apple-darwin","label":"macOS-ARM64"}'
@@ -112,6 +114,10 @@ jobs:
           uv sync --frozen
 
       # ── Static Analysis ──────────────────────────────────────────────
+      - name: Intel Mac wheel coverage (every locked dep has a macOS x86_64 wheel)
+        if: runner.os == 'Linux'
+        run: python scripts/check-macos-x64-wheels.py uv.lock
+
       - name: TypeScript type check
         run: npx tsc --noEmit --skipLibCheck
 
@@ -164,16 +170,70 @@ jobs:
         run: |
           uv run python scripts/integration-test.py --binary src-tauri/binaries/langhire-backend-${{ matrix.target }}.exe
 
-  summary:
-    needs: test
+  intel-mac:
+    # Intel Macs (x86_64) are a hard requirement: test natively, build the x86_64
+    # PyInstaller sidecar, bundle the .app/.dmg, launch it and check /health.
+    runs-on: macos-15-intel
+    name: Intel Mac (test, bundle, launch /health)
+    timeout-minutes: 75
+    env:
+      UV_PYTHON_PREFERENCE: only-managed
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - uses: astral-sh/setup-uv@v6
+      - name: Wheel coverage for macOS x86_64
+        run: python3 scripts/check-macos-x64-wheels.py uv.lock
+      - name: Python dependencies (native x86_64)
+        run: |
+          uv sync --frozen --python 3.13
+          ARCH=$(uv run python -c "import platform; print(platform.machine())")
+          echo "Python arch: $ARCH"
+          test "$ARCH" = "x86_64"
+      - run: npm ci
+      - name: Backend unit tests (pytest, x86_64)
+        run: uv run pytest tests/ -q
+      - name: Build backend sidecar (x86_64)
+        run: bash scripts/build-backend.sh x86_64-apple-darwin
+      - name: Sidecar self-test (frozen binary)
+        run: src-tauri/binaries/langhire-backend-x86_64-apple-darwin --self-test
+      - name: Bundle Tauri app (x86_64, unsigned)
+        run: npx tauri build --target x86_64-apple-darwin --bundles app,dmg
+      - name: Launch packaged app and check /health
+        run: |
+          APP=$(ls -d src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app | head -1)
+          bash scripts/smoke-macos-app.sh "$APP" x86_64
+      - name: Upload Intel bundle (3 days)
+        uses: actions/upload-artifact@v4
+        with:
+          name: applyqueue-macos-x64
+          path: src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+          retention-days: 3
+          if-no-files-found: error
+
+  required:
+    # Single required status check for branch protection on main.
+    needs: [test, intel-mac]
     runs-on: ubuntu-latest
     if: always()
+    name: Required checks
     steps:
-      - name: Test Summary
+      - name: All required jobs passed
         run: |
-          if [ "${{ needs.test.result }}" = "success" ]; then
-            echo "✅ All integration tests passed on all platforms"
+          echo "test=${{ needs.test.result }} intel-mac=${{ needs.intel-mac.result }}"
+          if [ "${{ needs.test.result }}" = "success" ] && [ "${{ needs.intel-mac.result }}" = "success" ]; then
+            echo "✅ All required jobs passed (Linux, Windows, Intel macOS)"
           else
-            echo "❌ Some integration tests failed"
+            echo "❌ A required job failed or was skipped"
             exit 1
           fi

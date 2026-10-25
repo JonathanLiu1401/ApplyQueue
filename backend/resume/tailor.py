@@ -1,7 +1,8 @@
 """
 Resume tailoring engine.
 Extracts text from PDF sections, sends to LLM with character-length constraints,
-replaces text in-place to preserve layout.
+and renders a fresh PDF. PDF I/O goes through core.pdf_io (pdfminer.six + ReportLab;
+PyMuPDF was removed because of its AGPL license).
 """
 import hashlib
 import json
@@ -9,14 +10,14 @@ import re
 from pathlib import Path
 from typing import Optional
 
-import fitz  # pymupdf
-
 try:
     from core.config import get_data_dir, load_settings, load_llm_settings
     from core.llm_factory import create_llm
+    from core import pdf_io
 except ImportError:
     from backend.core.config import get_data_dir, load_settings, load_llm_settings
     from backend.core.llm_factory import create_llm
+    from backend.core import pdf_io
 
 
 def _get_tailored_dir() -> Path:
@@ -29,8 +30,8 @@ def _url_hash(url: str) -> str:
     return hashlib.md5(url.encode()).hexdigest()[:12]
 
 
-def _extract_sections(doc: fitz.Document) -> list[dict]:
-    """Extract text blocks from the PDF grouped into logical sections.
+def _extract_sections(pdf_path) -> list[dict]:
+    """Extract text blocks from the PDF at ``pdf_path`` grouped into logical sections.
 
     Groups a section header block with all content blocks that follow it
     until the next section header.
@@ -54,26 +55,10 @@ def _extract_sections(doc: fitz.Document) -> list[dict]:
         "contact": "contact",
     }
 
-    all_blocks = []
-    for page_num in range(len(doc)):
-        page = doc[page_num]
-        blocks = page.get_text("dict")["blocks"]
-        for block in blocks:
-            if block["type"] != 0:
-                continue
-            text = ""
-            for line in block.get("lines", []):
-                for span in line.get("spans", []):
-                    text += span.get("text", "")
-                text += "\n"
-            text = text.strip()
-            if not text:
-                continue
-            all_blocks.append({
-                "page": page_num,
-                "bbox": block["bbox"],
-                "text": text,
-            })
+    all_blocks = [
+        {"page": b.page, "bbox": b.bbox, "text": b.text}
+        for b in pdf_io.extract_blocks(pdf_path)
+    ]
 
     # Identify which blocks are section headers
     sections = []
@@ -316,8 +301,7 @@ def _generate_fresh_pdf(
     Uses real font metrics for wrapping and tracks a y-cursor with page-overflow
     handling so no text is ever drawn below the usable area.
     """
-    doc = fitz.open()
-    page = doc.new_page(width=_PAGE_WIDTH, height=_PAGE_HEIGHT)
+    doc = pdf_io.PdfWriter(output_path, _PAGE_WIDTH, _PAGE_HEIGHT)
     usable_bottom = _PAGE_HEIGHT - _BOTTOM_MARGIN
 
     # Colors
@@ -325,21 +309,19 @@ def _generate_fresh_pdf(
     body_color = (0.19, 0.19, 0.19)    # dark gray for body
     light_color = (0.40, 0.40, 0.40)   # lighter gray for dates/secondary
 
-    state = {"page": page, "y": _TOP_MARGIN}
+    state = {"y": _TOP_MARGIN}
 
     def ensure_space(needed: float):
         """Start a new page if drawing ``needed`` points would overflow."""
         if state["y"] + needed > usable_bottom:
-            state["page"] = doc.new_page(width=_PAGE_WIDTH, height=_PAGE_HEIGHT)
+            doc.new_page()
             state["y"] = _TOP_MARGIN
 
     def draw_line_text(text: str, *, x: float, fontsize: float, fontname: str,
                        color: tuple, line_height: float, baseline_pad: float):
         ensure_space(line_height)
-        state["page"].insert_text(
-            fitz.Point(x, state["y"] + baseline_pad),
-            text, fontsize=fontsize, fontname=fontname, color=color,
-        )
+        doc.insert_text(x, state["y"] + baseline_pad, text,
+                        fontsize=fontsize, font=fontname, color=color)
         state["y"] += line_height
 
     def draw_wrapped(text: str, *, x: float, hang_x: float, width: float,
@@ -355,30 +337,21 @@ def _generate_fresh_pdf(
 
     def draw_section_header(title: str):
         ensure_space(28)
-        state["page"].insert_text(
-            fitz.Point(_MARGIN_LEFT, state["y"] + 12), title,
-            fontsize=12, fontname="helvetica-bold", color=header_color,
-        )
+        doc.insert_text(_MARGIN_LEFT, state["y"] + 12, title,
+                        fontsize=12, font="helvetica-bold", color=header_color)
         state["y"] += 18
-        state["page"].draw_line(
-            fitz.Point(_MARGIN_LEFT, state["y"]),
-            fitz.Point(_MARGIN_RIGHT, state["y"]),
-            color=(0.8, 0.8, 0.8), width=0.5,
-        )
+        doc.draw_line(_MARGIN_LEFT, state["y"], _MARGIN_RIGHT, state["y"],
+                      color=(0.8, 0.8, 0.8), width=0.5)
         state["y"] += 12
 
     # ─── Name ───
     ensure_space(42)
-    state["page"].insert_text(
-        fitz.Point(_MARGIN_LEFT, state["y"] + 30),
-        profile_name.upper() if profile_name else "",
-        fontsize=28, fontname="helvetica-bold", color=(0, 0, 0),
-    )
+    doc.insert_text(_MARGIN_LEFT, state["y"] + 30,
+                    profile_name.upper() if profile_name else "",
+                    fontsize=28, font="helvetica-bold", color=(0, 0, 0))
     state["y"] += 42
-    state["page"].draw_line(
-        fitz.Point(_MARGIN_LEFT, state["y"]), fitz.Point(_MARGIN_RIGHT, state["y"]),
-        color=(0.85, 0.20, 0.35), width=2,
-    )
+    doc.draw_line(_MARGIN_LEFT, state["y"], _MARGIN_RIGHT, state["y"],
+                  color=(0.85, 0.20, 0.35), width=2)
     state["y"] += 20
 
     # ─── Contact info (below name) ───
@@ -455,19 +428,25 @@ def _generate_fresh_pdf(
                              width=_TEXT_WIDTH, fontsize=_BODY_SIZE,
                              fontname="helv", color=body_color)
 
-    doc.save(str(output_path))
-    doc.close()
+    doc.save()
+
+
+class _HelveticaMetrics:
+    """Measures with the same base-14 Helvetica used for rendering."""
+
+    @staticmethod
+    def text_length(text: str, fontsize: float) -> float:
+        return pdf_io.text_length(text, fontsize, "helv")
 
 
 # Shared font used for both measuring and rendering so wrapping matches output.
-# "helv" maps to Helvetica, the same base-14 font used by insert_text below.
-_MEASURE_FONT = fitz.Font("helv")
+_MEASURE_FONT = _HelveticaMetrics()
 
 
 def _wrap_text(text: str, max_width: float, fontsize: float) -> list[str]:
     """Word-wrap ``text`` so each line renders within ``max_width`` points.
 
-    Uses real font metrics (fitz.Font.text_length) rather than an approximate
+    Uses real font metrics (Helvetica AFM metrics via ReportLab) rather than an approximate
     character-width estimate, so wrapped lines match the actually-rendered width.
     A single word that is wider than ``max_width`` cannot be split and is emitted
     on its own line.
@@ -487,15 +466,6 @@ def _wrap_text(text: str, max_width: float, fontsize: float) -> list[str]:
     return lines
 
 
-def _draw_wrapped(page, x: float, y: float, text: str, max_width: float, fontsize: float, fontname: str, color: tuple):
-    """Draw text with word wrap. Returns the new y-cursor after drawing."""
-    lines = _wrap_text(text, max_width, fontsize)
-    for line in lines:
-        page.insert_text(fitz.Point(x, y + 8), line, fontsize=fontsize, fontname=fontname, color=color)
-        y += fontsize + 2
-    return y
-
-
 async def tailor_resume(
     job_url: str,
     job_description: str,
@@ -507,18 +477,15 @@ async def tailor_resume(
     if not resume_path or not Path(resume_path).exists():
         raise FileNotFoundError("No resume PDF configured or file not found")
 
-    doc = fitz.open(resume_path)
-    sections = _extract_sections(doc)
+    sections = _extract_sections(resume_path)
     tailorable = _identify_tailorable_sections(sections, options)
 
     if not tailorable:
-        doc.close()
         raise ValueError("No tailorable sections found in resume matching selected options")
 
     tailored_text = await _generate_tailored_text(tailorable, job_description, options)
 
     if not tailored_text:
-        doc.close()
         raise ValueError("LLM could not tailor any sections within character limits")
 
     url_hash = _url_hash(job_url)
@@ -571,7 +538,6 @@ async def tailor_resume(
                 break
 
     _generate_fresh_pdf(all_sections_for_pdf, full_tailored, profile_name, contact_info, education_text, output_pdf)
-    doc.close()
 
     content_parts = []
     for i, s in enumerate(tailorable):

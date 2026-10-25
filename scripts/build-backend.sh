@@ -29,6 +29,21 @@ else
   fi
 fi
 
+# PyInstaller cannot cross-compile: the sidecar must be built on a host of the
+# target architecture (Intel Macs need a native x86_64 build, e.g. macos-15-intel).
+if [ "$(uname -s)" = "Darwin" ]; then
+  HOST_ARCH=$(uv run python -c "import platform; print(platform.machine())")
+  case "$TARGET" in
+    x86_64-apple-darwin) WANT=x86_64 ;;
+    aarch64-apple-darwin) WANT=arm64 ;;
+    *) WANT="" ;;
+  esac
+  if [ -n "$WANT" ] && [ "$HOST_ARCH" != "$WANT" ]; then
+    echo "❌ Target $TARGET needs a $WANT Python, but uv's Python is $HOST_ARCH." >&2
+    exit 1
+  fi
+fi
+
 # Build with PyInstaller
 uv run python -m PyInstaller \
   --onefile \
@@ -63,11 +78,17 @@ uv run python -m PyInstaller \
   --hidden-import yaml \
   --collect-all browser_use \
   --collect-all playwright \
+  --hidden-import pdfminer.high_level \
+  --collect-data pdfminer \
+  --collect-data reportlab \
   --clean \
   backend/main.py
 
 echo "✅ Backend binary built: src-tauri/binaries/langhire-backend-${TARGET}"
 ls -lh "src-tauri/binaries/langhire-backend-${TARGET}"
+if [ "$(uname -s)" = "Darwin" ]; then
+  echo "Architectures: $(lipo -archs "src-tauri/binaries/langhire-backend-${TARGET}")"
+fi
 
 # Sign the sidecar binary with entitlements (macOS only)
 # This allows the PyInstaller binary to load its extracted Python.framework

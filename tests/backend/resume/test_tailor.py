@@ -1,12 +1,12 @@
 """Unit tests for the resume tailoring engine (backend/resume/tailor.py).
 
-The engine parses a PDF (via pymupdf/fitz), extracts logical sections, sends
+The engine parses a PDF (via core.pdf_io: pdfminer.six + ReportLab), extracts logical sections, sends
 selected sections to an LLM for rewriting under character limits, and emits a
 freshly-generated PDF + markdown sidecar.
 
 Testing strategy:
 - Pure helpers (_url_hash, _wrap_text, _identify_tailorable_sections) tested directly.
-- _extract_sections tested against real, minimal PDFs built in-memory with fitz.
+- _extract_sections tested against real, minimal PDFs built with core.pdf_io.PdfWriter.
 - The LLM is always mocked (create_llm + ainvoke) — NO network.
 - File outputs land in the isolated tmp data dir via the ``data_dir`` fixture.
 """
@@ -14,8 +14,9 @@ import hashlib
 import json
 from pathlib import Path
 
-import fitz
 import pytest
+
+from core import pdf_io
 
 import resume.tailor as tailor
 from resume.tailor import (
@@ -48,15 +49,13 @@ from resume.tailor import (
 def _make_pdf(path: Path, blocks: list[tuple[float, float, str]]):
     """Write a single-page PDF placing each (x, y, text) string as a block.
 
-    fitz groups text into blocks; placing each string far apart vertically keeps
+    pdfminer groups text into blocks; placing each string far apart vertically keeps
     them in distinct blocks so _extract_sections can treat them independently.
     """
-    doc = fitz.open()
-    page = doc.new_page(width=612, height=792)
+    doc = pdf_io.PdfWriter(path, 612, 792)
     for x, y, text in blocks:
-        page.insert_text(fitz.Point(x, y), text, fontsize=11)
-    doc.save(str(path))
-    doc.close()
+        doc.insert_text(x, y, text, fontsize=11)
+    doc.save()
 
 
 def _resume_blocks() -> list[tuple[float, float, str]]:
@@ -137,18 +136,14 @@ class TestIdentifyTailorableSections:
 
 class TestExtractSections:
     def test_extracts_known_sections(self, resume_pdf):
-        doc = fitz.open(str(resume_pdf))
-        sections = _extract_sections(doc)
-        doc.close()
+        sections = _extract_sections(resume_pdf)
         types = [s["section_type"] for s in sections]
         assert "skills" in types
         assert "experience" in types
         assert "education" in types
 
     def test_section_has_content_and_metadata(self, resume_pdf):
-        doc = fitz.open(str(resume_pdf))
-        sections = _extract_sections(doc)
-        doc.close()
+        sections = _extract_sections(resume_pdf)
         skills = next(s for s in sections if s["section_type"] == "skills")
         assert "Python" in skills["text"]
         assert skills["char_count"] == len(skills["text"])
@@ -158,9 +153,7 @@ class TestExtractSections:
     def test_no_headers_yields_no_sections(self, tmp_path):
         p = tmp_path / "plain.pdf"
         _make_pdf(p, [(40, 60, "Just some plain text"), (40, 120, "More text here")])
-        doc = fitz.open(str(p))
-        sections = _extract_sections(doc)
-        doc.close()
+        sections = _extract_sections(p)
         assert sections == []
 
     def test_header_with_no_content_is_dropped(self, tmp_path):
@@ -171,9 +164,7 @@ class TestExtractSections:
             (40, 90, "Python"),
             (40, 700, "Education"),  # header but nothing after it
         ])
-        doc = fitz.open(str(p))
-        sections = _extract_sections(doc)
-        doc.close()
+        sections = _extract_sections(p)
         types = [s["section_type"] for s in sections]
         assert "skills" in types
         assert "education" not in types
@@ -186,22 +177,15 @@ class TestExtractSections:
             (40, 150, "Technologies"),
             (40, 180, "Go, Rust"),
         ])
-        doc = fitz.open(str(p))
-        sections = _extract_sections(doc)
-        doc.close()
+        sections = _extract_sections(p)
         types = {s["section_type"] for s in sections}
         assert "overview" in types  # "Summary"
         assert "skills" in types    # "Technologies"
 
     def test_empty_pdf_yields_no_sections(self, tmp_path):
         p = tmp_path / "empty.pdf"
-        doc = fitz.open()
-        doc.new_page(width=612, height=792)
-        doc.save(str(p))
-        doc.close()
-        doc = fitz.open(str(p))
-        assert _extract_sections(doc) == []
-        doc.close()
+        pdf_io.PdfWriter(p, 612, 792).save()
+        assert _extract_sections(p) == []
 
 
 # ── _generate_tailored_text (LLM mocked) ─────────────────────────────────────
@@ -331,7 +315,7 @@ class TestTailorResume:
     async def test_end_to_end_produces_pdf_and_md(self, monkeypatch, data_dir, resume_pdf):
         resp = _Completion(json.dumps({"0": "Python, GCP", "1": "- Led cloud migration"}))
         self._configure(monkeypatch, data_dir, resume_pdf, resp,
-                        profile={"name": "Jane", "email": "j@x.com"})
+                        profile={"name": "Alex Example", "email": "alex@example.com"})
         result = await tailor_resume(
             "https://job/1", "Cloud role", {"skills": True, "experience": True}
         )
@@ -382,7 +366,7 @@ class TestTailorResume:
     async def test_refine_resume_delegates(self, monkeypatch, data_dir, resume_pdf):
         resp = _Completion(json.dumps({"0": "Python, GCP"}))
         self._configure(monkeypatch, data_dir, resume_pdf, resp,
-                        profile={"name": "Jane"})
+                        profile={"name": "Alex Example"})
         result = await refine_resume("https://job/3", "jd", "make it punchy", {"skills": True})
         assert Path(result["path"]).exists()
 
@@ -560,15 +544,9 @@ def _make_sections(skills_text="", experience_text=""):
     return secs
 
 
-def _all_text_spans(doc):
-    """Yield (page, span_dict) for every text span in the document."""
-    for page in doc:
-        for block in page.get_text("dict")["blocks"]:
-            if block["type"] != 0:
-                continue
-            for line in block.get("lines", []):
-                for span in line.get("spans", []):
-                    yield page, span
+def _all_text_lines(path):
+    """Every text line in the PDF with its position (top-left origin)."""
+    return pdf_io.extract_lines(path)
 
 
 class TestGenerateFreshPdf:
@@ -579,16 +557,13 @@ class TestGenerateFreshPdf:
         )
         out = tmp_path / "out.pdf"
         _generate_fresh_pdf(_make_sections(experience_text=long_exp), {},
-                            "Jane Doe", "jane@x.com", "BS CS, MIT", out)
-        doc = fitz.open(str(out))
-        try:
-            for page, span in _all_text_spans(doc):
-                x0, y0, x1, y1 = span["bbox"]
-                assert y1 <= _PAGE_HEIGHT, f"text below page bottom: {y1}"
-                assert x1 <= _PAGE_WIDTH + 1, f"text past right edge: {x1}"
-                assert y0 >= 0 and x0 >= 0
-        finally:
-            doc.close()
+                            "Alex Example", "alex@example.com", "BS CS, MIT", out)
+        lines = _all_text_lines(out)
+        assert lines
+        for ln in lines:
+            assert ln.bottom <= _PAGE_HEIGHT, f"text below page bottom: {ln.bottom}"
+            assert ln.x1 <= _PAGE_WIDTH + 1, f"text past right edge: {ln.x1}"
+            assert ln.top >= 0 and ln.x0 >= 0
 
     def test_enough_content_produces_multiple_pages(self, tmp_path):
         long_exp = "\n".join(
@@ -597,25 +572,17 @@ class TestGenerateFreshPdf:
         )
         out = tmp_path / "multi.pdf"
         _generate_fresh_pdf(_make_sections(experience_text=long_exp), {},
-                            "Jane Doe", "jane@x.com", "", out)
-        doc = fitz.open(str(out))
-        try:
-            assert doc.page_count > 1
-        finally:
-            doc.close()
+                            "Alex Example", "alex@example.com", "", out)
+        assert pdf_io.page_count(out) > 1
 
     def test_short_content_single_page(self, tmp_path):
         out = tmp_path / "short.pdf"
         _generate_fresh_pdf(
             _make_sections(skills_text="Python, AWS",
                            experience_text="Engineer — Acme\n• Built systems"),
-            {}, "Jane", "jane@x.com", "BS CS", out,
+            {}, "Alex Example", "alex@example.com", "BS CS", out,
         )
-        doc = fitz.open(str(out))
-        try:
-            assert doc.page_count == 1
-        finally:
-            doc.close()
+        assert pdf_io.page_count(out) == 1
 
     def test_bullet_continuation_lines_share_hanging_indent(self, tmp_path):
         # A long bullet wraps; continuation lines align under the first line's
@@ -623,14 +590,10 @@ class TestGenerateFreshPdf:
         bullet = "• " + ("scaled the platform to handle massive traffic " * 6)
         out = tmp_path / "hang.pdf"
         _generate_fresh_pdf(_make_sections(experience_text=f"Role — Org\n{bullet}"),
-                            {}, "Jane", "", "", out)
-        doc = fitz.open(str(out))
-        try:
-            spans = [s for _, s in _all_text_spans(doc)
-                     if "scaled" in s["text"] or "platform" in s["text"]]
-            assert len(spans) > 1  # the bullet wrapped
-            xs = sorted({round(s["bbox"][0]) for s in spans})
-            # Bullet glyph line and continuation lines both indented past margin.
-            assert all(x > 36 for x in xs)
-        finally:
-            doc.close()
+                            {}, "Alex Example", "", "", out)
+        spans = [ln for ln in _all_text_lines(out)
+                 if "scaled" in ln.text or "platform" in ln.text]
+        assert len(spans) > 1  # the bullet wrapped
+        xs = sorted({round(ln.x0) for ln in spans})
+        # Bullet glyph line and continuation lines both indented past margin.
+        assert all(x > 36 for x in xs)

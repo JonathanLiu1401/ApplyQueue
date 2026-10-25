@@ -18,7 +18,9 @@ jobs:
           - platform: macos-latest
             target: aarch64-apple-darwin
             label: macOS-ARM64
-          - platform: macos-latest
+          # Intel Macs are a hard requirement. PyInstaller cannot cross-compile,
+          # so the x86_64 sidecar must be built on a native Intel runner.
+          - platform: macos-15-intel
             target: x86_64-apple-darwin
             label: macOS-x64
           - platform: ubuntu-22.04
@@ -63,9 +65,12 @@ jobs:
         run: npm install
 
       - name: Install Python dependencies
+        # uv-managed CPython ships libpython as a shared lib, which PyInstaller needs.
+        env:
+          UV_PYTHON_PREFERENCE: only-managed
         run: |
           pip install uv
-          uv sync
+          uv sync --frozen --python 3.13
 
       - name: Build Python backend (PyInstaller)
         run: bash scripts/build-backend.sh ${{ matrix.target }}

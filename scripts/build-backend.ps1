@@ -50,6 +50,9 @@ uv run python -m PyInstaller `
   --hidden-import yaml `
   --collect-all browser_use `
   --collect-all playwright `
+  --hidden-import pdfminer.high_level `
+  --collect-data pdfminer `
+  --collect-data reportlab `
   --clean `
   backend/main.py
 

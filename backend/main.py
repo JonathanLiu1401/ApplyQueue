@@ -1404,13 +1404,8 @@ async def parse_resume_to_profile():
         return {"success": False, "message": "Resume path must be within your home directory."}
 
     try:
-        import fitz  # pymupdf
-        doc = fitz.open(str(resume_file))
-        resume_text = ""
-        for page in doc:
-            resume_text += page.get_text()
-        doc.close()
-        resume_text = resume_text.strip()
+        from core.pdf_io import extract_text
+        resume_text = extract_text(resume_file).strip()
         if not resume_text:
             return {"success": False, "message": "Could not extract any text from the resume PDF."}
     except Exception as e:
@@ -2043,6 +2038,13 @@ async def reload_plugins():
 
 # ── Main ──────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--self-test":
+        # Packaging smoke test (CI): imports above succeeded; check PDF I/O and arch.
+        from core.pdf_io import self_test as _pdf_self_test
+
+        print(json.dumps(_pdf_self_test()), flush=True)
+        sys.exit(0)
+
     def _handle_sigterm(signum, frame):
         _log.info(f"Received signal {signum} — cleaning up and exiting")
         _kill_browser_processes()

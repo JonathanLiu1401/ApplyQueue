@@ -14,10 +14,11 @@ dependencies = [
     "langchain-core>=1.2.28",
     "langchain-google-genai>=4.2.5",
     "langchain-openai>=1.1.9",
+    "pdfminer-six>=20250506",
     "playwright>=1.58.0",
     "pyinstaller>=6.19.0",
-    "pymupdf>=1.27.2.2",
     "pyyaml>=6.0.1",
+    "reportlab>=4.2",
     "uvicorn>=0.44.0",
 ]
 
@@ -53,3 +54,9 @@ exclude_lines = [
     "raise NotImplementedError",
     "if TYPE_CHECKING:",
 ]
+
+[tool.uv]
+# Intel Macs (x86_64) are a hard requirement. cryptography >= 49 ships no macOS
+# x86_64/universal2 wheels, so stay on 48.x until that changes. Enforced by
+# scripts/check-macos-x64-wheels.py in CI.
+constraint-dependencies = ["cryptography>=48.0.1,<49"]

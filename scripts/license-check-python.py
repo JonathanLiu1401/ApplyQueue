@@ -21,13 +21,6 @@ ALLOWED = {
 }
 # name -> reason. Keep this short; every entry needs a plan.
 EXCEPTIONS = {
-    "pymupdf": "AGPL-3.0 (or Artifex commercial). Used by LangHire for resume parsing; "
-               "must be replaced (e.g. pypdf, BSD) before any public binary release (PLAN.md M1).",
-    "pymupdf4llm": "No license metadata; Artifex package pulled in by pymupdf 2.x (AGPL/commercial family). "
-                   "Goes away with the pymupdf replacement (PLAN.md M1).",
-    "pymupdf-layout": "No license metadata; Artifex package pulled in by pymupdf 2.x. Goes away with the "
-                      "pymupdf replacement (PLAN.md M1).",
-    "pymupdf_layout": "Same as pymupdf-layout.",
     "pyinstaller": "GPL-2.0 with bootloader exception: build tool only; the exception allows "
                    "distributing bundled apps under any license.",
     "pyinstaller-hooks-contrib": "GPL-2.0 / Apache-2.0, build-time hooks only.",

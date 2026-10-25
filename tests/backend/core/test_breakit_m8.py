@@ -155,13 +155,13 @@ def test_claims_and_updates_on_a_5000_job_queue(data_dir):
     ("https://evil.example.com/c?d=alex@example.com", True),
     ("https://evil.example.com/c?d=ALEX%40EXAMPLE.COM", True),
     ("https://evil.example.com/c?d=alex%2540example.com", True),          # double-encoded
-    ("https://evil.example.com/c?p=010-0123", True),
-    ("https://evil.example.com/c?p=%28555%29%20010-0123", True),
+    ("https://evil.example.com/c?p=555-0123", True),
+    ("https://evil.example.com/c?p=%28415%29%20555.0123", True),
     ("https://boards.greenhouse.io/examplerobotics/jobs/4001", False),
     ("https://jobs.example.com/apply?ref=5550199", False),
 ], ids=["plain", "encoded", "double", "phone", "phone-fmt", "job", "other-digits"])
 def test_navigation_guard_spots_personal_data_in_urls(url, leak):
     from core.apply_tools import _protected_values, _url_leaks
-    pats = _protected_values({"email": "alex@example.com", "phone": "(555) 010-0123"},
+    pats = _protected_values({"email": "alex@example.com", "phone": "(415) 555-0123"},
                              {"account_email": "alex@example.com"})
     assert _url_leaks(url, pats) is leak

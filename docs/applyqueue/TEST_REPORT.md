@@ -15,7 +15,7 @@ CI runs: `https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/<id>`
 
 ## 0. CI plan and the staged full-suite command
 
-CI was trimmed while Actions billing is blocked (commit below), to cut macOS minutes:
+CI was trimmed while Actions billing is blocked (c0629eb), to cut macOS minutes:
 
 | Trigger | What runs |
 |---|---|
@@ -90,6 +90,25 @@ and (b) the launch/health smoke of the real `.app` bundle.
 | Concurrent instances / multi-device | sync + schedule tests above | |
 | Non-ASCII paths with spaces | all UI/sidecar e2e use `Alex Example ü dätä dir`-style data dirs and résumé names | |
 | Expired tokens | mail invalid_grant / revoke, sync device flow denied, schedule expired-login pause | |
+| **Prompt injection, obeyed by the model** (page text tells the AI to open `/collect?data=<email>,<password>` and click Submit; visible, `display:none` and white 1px copies) | `tests/e2e/test_agent_hostile_pages.py::test_prompt_injection_obeyed_by_the_model_still_cannot_submit_blind_or_leak` | **bug fixed** (87f5b29): a model that followed the page **leaked the candidate's email to the attacker URL**. browser_use replaces `<secret>` placeholders in every action, including `navigate`. `navigate`/`go_to_url`/`search` now refuse any URL that contains the email or phone, even URL-encoded once, twice or three times, or copied as a literal (unit test with 7 cases). The password never reached the URL: it is not in `sensitive_data` and is typed only by `fill_site_password`. The blind Submit (both `submit_form_guarded` and a plain `click`) was refused because of unanswered questions. 0 submissions, never "success" |
+| Prompt injection + **honeypot field** with a normal model | `test_prompt_injection_and_honeypot_with_a_normal_model` | **bug fixed** (87f5b29): an off-screen "Leave this field blank" input counted as an unanswered question, so a normal application ended as `needs_human`. The form scan now ignores honeypots (off-screen, inside `aria-hidden`, opacity 0 with no tab stop, or "leave blank" / "do not fill" labels). It submits, and the honeypot stays empty (the mock records any value) |
+| Injection on a Workday-style account page | `test_injected_account_page_never_shows_the_site_password_to_the_model` | the site password never appears in any LLM prompt; submits normally (same honeypot fix) |
+| Infinite redirect (302 to itself) | `test_infinite_redirect_ends_without_success` | browser reports `ERR_TOO_MANY_REDIRECTS`; ends without success in about 25 s, no submission |
+| Slow-loris page (headers, then 1 byte every 2 s for 3 min) | `test_slow_loris_page_ends_without_success_in_bounded_time` | not success, no submission. Bounded, but slow: **about 200 s**, because each screenshot waits 15 s. Acceptable for now; see §6 |
+| Popup / new tab on page load (`window.open`) | `test_popup_new_tab_does_not_derail_the_application` | the agent stays on the application and submits once with truthful answers (about 15 s) |
+| Résumé upload rejected by the site (400 + "file type not accepted") | `test_upload_rejected_is_not_success_and_stops` | not success, no submission recorded, ≤ 3 submit clicks (the same-form retry cap), about 8 s |
+| Session expiry mid-form (401 "session has expired" on the last page) | `test_session_expiry_mid_form_is_not_success` | not success, no submission recorded, about 40 s |
+| CAPTCHA pages | `test_agent_apply_e2e.py` captcha cases (earlier) | goes to a person, never solved or skipped |
+| **Malformed credentials file** (truncated JSON, empty, invalid UTF-8, a list, `sites` as a string, one bad entry, UTF-8 BOM) | `tests/backend/core/test_breakit_m8.py` | **bug fixed** (87f5b29): any of these crashed every vault call (job runs and Settings). Now the file is validated, a broken one is quarantined byte-for-byte as `site_credentials.json.corrupt-<ts>` and the vault starts empty (sync can restore it), and damaged entries are dropped while the others are kept. If the broken file cannot be moved, it is **never overwritten**: writes raise instead |
+| **Corrupt SQLite** memory/metrics DB (text file, damaged header) | `test_corrupt_memory_db_is_quarantined_and_recreated[text/bad-header]` | **bug fixed** (87f5b29): the store crashed on open. Now the DB, `-wal`, `-shm` and `-journal` files are quarantined and a fresh DB is created |
+| **Locked SQLite** (another process holds `BEGIN EXCLUSIVE`) | `test_locked_memory_db_waits_then_works`, `…_past_timeout_raises_without_quarantine` | waits up to 15 s (busy timeout), and a lock is never treated as corruption |
+| Memory DB unusable **after a submission** | `test_memory_context_survives_an_unusable_store` + `cli/apply_jobs.py` | **bug fixed** (87f5b29): a memory/metrics error after the agent had submitted hit the outer handler and marked the job **failed** (which invites a re-apply). Memory is now best-effort before and after the run |
+| Giant résumé PDF (> 50 MB sparse file; 1500-page PDF) | `tests/backend/test_main_api.py` | **bug fixed** (87f5b29): parsing ran on the event loop over every page, so the whole sidecar UI froze. Now there is a 50 MB cap (clear message in < 2 s), only the first 20 pages are read, and parsing runs off the event loop |
+| Image-only (scanned) résumé PDF | `test_main_api.py` | **fixed**: was a generic "no text" error. Now it says it looks scanned or image-only and to export a text PDF |
+| Unicode / NFD / RTL / emoji / spaced résumé filenames (`Alex Example résumé 履歴書 🚀.pdf`) | `test_main_api.py` | parse and ATS check work |
+| 1000+ job queue (5000 jobs) | `test_breakit_m8.py` (claim/update < 0.25 s each), `test_main_api.py` (`/jobs`, `/jobs/stats` < 3 s) | passes. No fix needed |
+| Sync remote **force-pushed with an orphan history** | `test_sync.py::test_force_pushed_orphan_history_loses_nothing` | no local data lost. The next sync merges unrelated histories, re-publishes every job and the `.gitattributes`, and a second device converges |
+| Sync remote **rewound** (`reset --hard HEAD~1` + force push dropped a `confirmed` event) | `test_remote_rewound_by_force_push_is_restored` | the device that still has it re-pushes it, the other device gets `confirmed`, and there are no duplicate ledger events |
 
 ## 4. Real local Ollama (honest numbers)
 
@@ -115,6 +134,8 @@ and (b) the launch/health smoke of the real `.app` bundle.
 | 2ac9b2f | Windows: schedule time zones silently ignored (no tz database). `tzdata` bundled; DST/time-zone tests; frozen self-test checks the tz database on all OSes |
 | dd77c14 | résumé path check: real containment (macOS temp, `/Volumes`, Linux mounts; sibling-prefix hole); watchdog watches launcher + direct parent (Windows onefile regression from 94f98f8); WebDriver allows `degraded` health; experimental Windows WebDriver job (msedgedriver-tool + tauri-driver, continue-on-error) |
 | 6524648 | browser cleanup limited to this instance's profile (other instances' browsers killed; never matched on Windows; chrome-wide taskkill fallback removed); per-test browser profile in agent e2e |
+| 87f5b29 | prompt-injection exfiltration (email in `navigate` URL); honeypot fields blocked submission; malformed credentials file crash (+ never overwrite an unmovable corrupt vault); corrupt/locked SQLite; memory error after submit marked the job failed; giant PDF froze the sidecar; image-only PDF message |
+| d3fed50 / dc930fd | hostile-page e2e fixtures + tests; sync force-push / rewind tests (no product change needed) |
 | d915b59 | Windows dev mode: orphan detection through the venv redirector; packaged orphan test pid fix; real-app WebDriver wizard fix and a Linux CI job |
 
 ## 6. Known limitations
@@ -124,11 +145,13 @@ and (b) the launch/health smoke of the real `.app` bundle.
 - Agent e2e uses a scripted LLM stand-in. Real-model quality is measured only by the Ollama run above.
 - Sync e2e uses a local bare git repo instead of github.com, and repo visibility is checked only before a push (pulls from a public repo are harmless, and creds are only written on push).
 - macOS: no WebDriver for WKWebView, so the real webview is not driven there, only launched and health-checked.
+- The exfiltration guard covers URLs (navigate/search). A hostile page could still ask the model to type personal data into a field **on that page**, which is indistinguishable from filling the application. Only the email and phone are guarded, not the name or address.
+- A slow-loris page takes about 200 s to give up (browser_use screenshot and step timeouts); this is bounded, but slow.
 
 ## 7. Not tested yet (honest)
 
 - **Any CI since dd77c14** (Actions billing). Windows, Intel Mac and Apple silicon need a re-run once billing is fixed.
-- Apple-silicon arm64 run in M8 (`gh workflow run test.yml -f run_macos=true`, blocked by billing).
+- Apple-silicon arm64 run in M8 (included in `gh workflow run test.yml -R JonathanLiu1401/ApplyQueue --ref main`, blocked by billing).
 - Real Tauri app over WebDriver on Windows: job written in dd77c14 (`msedgedriver-tool` fetches the msedgedriver matching WebView2; tauri-driver `--native-driver`; `continue-on-error` until proven), never run (billing).
 - Sync against a real github.com repo: needs Art's OK to create a throwaway private repo on his account (proposed: `applyqueue-sync-e2e-20261025`, created `--private`, visibility re-checked as PRIVATE before any write, deleted afterwards only if `gh` has the `delete_repo` scope, otherwise left private and listed here). Not done.
 - Real Gmail/Outlook/GitHub accounts (by design: mocks only).

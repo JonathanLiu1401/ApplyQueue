@@ -351,7 +351,10 @@ class SyncEngine:
     def _lock_expired(self, blob: str) -> bool:
         try:
             d = json.loads(blob)
-            return _parse(d["claimed_at"]) + int(d.get("ttl_sec", 0)) < _clock()
+            at, ttl, now = _parse(d["claimed_at"]), int(d.get("ttl_sec", 0)), _clock()
+            # A claim stamped more than one TTL in the future came from a device whose clock was
+            # wrong (or jumped): honour it for at most ~2 TTLs instead of until that date.
+            return at + ttl < now or at - now > ttl
         except (ValueError, KeyError, TypeError):
             return True
 

@@ -203,3 +203,22 @@ def test_huge_session_stays_local_and_is_fast(world):
     assert a.load_session("default")["cookies"][0]["name"] == "_s"
     small = {"cookies": state["cookies"], "origins": []}
     assert a.save_session("default", small)["saved"] == "repo"
+
+
+# ── a device with a clock far ahead ──
+def test_lock_from_a_device_with_a_fast_clock_does_not_block_for_a_year(world, monkeypatch):
+    from core.sync import engine as eng
+    now = [1_800_000_000.0]
+    monkeypatch.setattr(eng, "_clock", lambda: now[0])
+    a = world.use("laptop", kind="git")
+    a.sync_now()
+    now[0] += 365 * 86400                                   # laptop's clock is a year ahead
+    assert a.try_named_lock("search-s_1", 600)["ok"]        # ... and it dies mid-run
+    now[0] -= 365 * 86400
+    b = world.use("desktop", kind="git")
+    assert b.try_named_lock("search-s_1", 600)["stale_recovered"]
+    # a modest skew (a few minutes ahead) is still honoured
+    now[0] += 120
+    assert world.use("laptop", kind="git").try_named_lock("search-s_2", 600)["ok"]
+    now[0] -= 120
+    assert world.use("desktop", kind="git").try_named_lock("search-s_2", 600)["ok"] is False

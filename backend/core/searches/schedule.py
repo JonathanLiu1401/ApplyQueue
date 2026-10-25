@@ -108,6 +108,23 @@ def _tz(name: str | None):
     return None
 
 
+def _repeated_hour_slot(ts, out, zone, mins, hours, doms, months, dows, dom_r, dow_r) -> float | None:
+    """The wall-clock walk above sees a fall-back hour once (its first pass). Like cron, a
+    schedule that runs every hour also runs in the repeated hour; fixed-hour schedules do not
+    (a daily 01:30 runs once). Only real instants on the second pass (fold=1) are checked."""
+    if len(hours) < 24 or out - ts > 3 * 3600:
+        return None
+    u = (int(ts) // 60 + 1) * 60
+    while u < out:
+        lt = datetime.fromtimestamp(u, zone) if zone else datetime.fromtimestamp(u)
+        if lt.fold and lt.minute in mins and lt.month in months:
+            dom_ok, dow_ok = lt.day in doms, (lt.isoweekday() % 7) in dows
+            if (dom_ok or dow_ok) if (dom_r and dow_r) else (dom_ok and dow_ok):
+                return float(u)
+        u += 60
+    return None
+
+
 def next_after(expr: str, ts: float, tz: str | None = None) -> float:
     """First cron slot strictly after ``ts`` (epoch seconds), evaluated in ``tz`` wall-clock time."""
     mins, hours, doms, months, dows, dom_r, dow_r = parse_cron(expr)
@@ -133,7 +150,7 @@ def next_after(expr: str, ts: float, tz: str | None = None) -> float:
         aware = t.replace(tzinfo=zone) if zone else t.astimezone()
         out = aware.timestamp()
         if out > ts:
-            return out
+            return _repeated_hour_slot(ts, out, zone, mins, hours, doms, months, dows, dom_r, dow_r) or out
         t += timedelta(minutes=1)
     raise CronError("This schedule never runs")
 
@@ -246,7 +263,9 @@ def _running(st: dict, now: float) -> bool:
     if not r:
         return False
     beat = max(float(r.get("since") or 0), float(r.get("beat") or 0))
-    return now - beat < RUN_TTL_S
+    # a mark from the "future" means the clock was set back after the run started (or the app
+    # was killed after a forward jump); without this the search would look busy until that date
+    return -RUN_TTL_S < now - beat < RUN_TTL_S
 
 
 def heartbeat(sid: str, device: str = "", now: float | None = None) -> bool:

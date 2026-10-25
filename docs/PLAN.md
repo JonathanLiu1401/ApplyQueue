@@ -110,7 +110,13 @@ SQLite stays a local cache.
 - `vitest`: **481 pass / 8 fail**. All 8 are `translations.test.ts` because `src/locales/{it,zh}/jobs.json`
   are missing: LangHire's `.gitignore` ignores `jobs.json` everywhere, so those translations
   were never committed (an upstream bug). Fix in M1 (negated ignore + add files).
-- `npm run build` (tsc + vite): passes. Backend binary and `tauri build` results: see the M1 status.
+- `npm run build` (tsc + vite): passes.
+- Backend sidecar (`scripts/build-backend.sh`, PyInstaller): builds (183 MB onefile). It needs a Python
+  with a shared `libpython` (uv-managed CPython 3.13 works; Debian's system python did not).
+  Smoke test with an isolated `HOME`: `GET /health` → 200 (`database: true`; Chromium auto-install
+  starts on first run).
+- `npx tauri build --bundles deb,appimage`: passes (`.deb` 194 MB, `.AppImage` 295 MB). Under
+  `xvfb-run` the app starts, spawns the sidecar on port 8743, and stays up until killed.
 
 ### 2.9 Other findings
 - CSP is `default-src 'self' 'unsafe-inline' 'unsafe-eval' https: http: …`. Tighten in M1.
@@ -191,14 +197,14 @@ Only with Art's OK via Job Manager:
 4. Lockfile refresh (`npm ci` fails upstream).
 
 ## 5. M1 status
-See the "M1 status" section of the current report in the PR/commit log. The tasks are tracked
-here:
+M1 checklist (updated with each M1 commit):
 - [x] Merge LangHire history; archive Electron scaffold; attribution; LICENSE; docs moved.
 - [x] Privacy + license CI adapted; test.yml path filters; macOS manual-only.
 - [x] Local Linux build: `npm run build`, pytest, vitest (8 known i18n failures).
-- [ ] Sidecar binary + `tauri build` (deb/AppImage) on Linux. In progress on the box.
+- [x] Sidecar binary + `tauri build` (deb/AppImage) on Linux; app + sidecar smoke-run under xvfb.
 - [ ] Rename to ApplyQueue (identifier, data-dir migration, sidecar name).
-- [ ] CI app builds on 3 OSes (`build-check.yml`, path-filtered, macOS manual).
+- [x] CI app builds (`build-check.yml`): Linux + Windows on path-filtered push/PR, macOS ARM64 on
+  manual dispatch. First CI run pending (not yet verified green).
 - [ ] Telemetry off by default; CSP; i18n files; PyMuPDF replacement.
 
 ## 6. Guardrails (unchanged)

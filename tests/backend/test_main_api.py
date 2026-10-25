@@ -1086,3 +1086,23 @@ class TestSearchesApi:
         assert d["sent"] is False and "Acme Widgets" in d["body"]
         assert len(auth_client.get("/outreach/drafts").json()) == 1
         assert auth_client.delete(f"/outreach/drafts/{d['id']}").json()["success"]
+
+
+def test_resume_location_rules(tmp_path, monkeypatch):
+    """M8: the old string-prefix check rejected macOS temp/external drives and accepted sibling
+    home folders (/Users/al vs /Users/alex)."""
+    from pathlib import Path
+    home, sibling, vol = tmp_path / "al", tmp_path / "alex", tmp_path / "Volumes"
+    for d in (home, sibling, vol):
+        d.mkdir()
+    (vol / "USB").symlink_to(home, target_is_directory=True) if os.name != "nt" else None
+    if os.name == "nt":
+        assert main._resume_location_ok((home / "cv.pdf").resolve())
+        assert not main._resume_location_ok(Path(os.environ.get("WINDIR", r"C:\Windows")).resolve() / "cv.pdf")
+        return
+    monkeypatch.setattr(main, "_resume_roots", lambda: [home, vol])
+    assert main._resume_location_ok((home / "cv.pdf").resolve())
+    assert main._resume_location_ok((vol / "USB" / "cv.pdf").resolve())  # symlinked roots
+    assert not main._resume_location_ok((sibling / "cv.pdf").resolve())   # sibling prefix
+    assert not main._resume_location_ok(Path("/etc/cv.pdf"))
+    assert main._resume_roots is not None

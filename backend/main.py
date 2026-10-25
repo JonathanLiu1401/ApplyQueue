@@ -245,43 +245,49 @@ app.add_middleware(
 def _start_parent_watchdog():
     """Exit if the parent process (Tauri app) dies — prevents orphaned sidecar.
 
-    Watches the app window, not the PyInstaller onefile bootloader (our direct parent in a
-    packaged build), which outlives a crashed/killed window and kept the sidecar alive (M8)."""
-    parent_pid = _PARENT_PID
-    if parent_pid <= 1:
-        _log.info(f"Parent watchdog skipped (ppid={parent_pid}, already orphaned or init)")
+    Watches both the app window and our direct parent. In a packaged build the direct parent is
+    the PyInstaller onefile bootloader: it outlives a crashed/killed window (so the window must be
+    watched, M8), and on Windows stopping the bootloader does not stop us (so it must be watched
+    too, otherwise a sidecar restart leaves us holding the port)."""
+    watched = sorted({p for p in (_PARENT_PID, _LAUNCH_PPID) if p > 1})
+    if not watched:
+        _log.info(f"Parent watchdog skipped (ppid={_PARENT_PID}, already orphaned or init)")
         return
 
     def _watch():
         import time as _time
+        procs = {}
         try:
             import psutil
-            parent = psutil.Process(parent_pid)
+            for pid in watched:
+                try:
+                    procs[pid] = psutil.Process(pid)
+                except Exception:
+                    procs[pid] = None
         except Exception:
-            parent = None
+            procs = dict.fromkeys(watched)
+
+        def _alive(pid):
+            proc = procs.get(pid)
+            if proc is not None:
+                return proc.is_running()
+            try:
+                from core.jobs_store import _pid_alive
+            except ImportError:  # pragma: no cover
+                from backend.core.jobs_store import _pid_alive
+            return _pid_alive(pid)
 
         # Grace period: wait 10s before starting checks.
         _time.sleep(10)
-        
-        while True:
+        while all(_alive(pid) for pid in watched):
             _time.sleep(5)
-            if parent:
-                if not parent.is_running():
-                    break
-            else:
-                try:
-                    from core.jobs_store import _pid_alive
-                except ImportError:  # pragma: no cover
-                    from backend.core.jobs_store import _pid_alive
-                if not _pid_alive(parent_pid):
-                    break
-        
+
         _log.info("Parent process died — shutting down backend")
         os.kill(os.getpid(), signal.SIGTERM)
 
     t = threading.Thread(target=_watch, daemon=True, name="parent-watchdog")
     t.start()
-    _log.info(f"Parent watchdog started (monitoring PID {parent_pid})")
+    _log.info(f"Parent watchdog started (monitoring PIDs {watched})")
 
 
 def _recover_stale_jobs():
@@ -2440,6 +2446,34 @@ async def export_memories():
     return []
 
 
+def _resume_roots() -> list[Path]:
+    import tempfile
+
+    roots = [Path.home(), Path(tempfile.gettempdir()), Path("/tmp")]
+    if sys.platform == "darwin":
+        roots.append(Path("/Volumes"))
+    elif sys.platform.startswith("linux"):
+        roots += [Path("/media"), Path("/mnt"), Path("/run/media")]
+    return roots
+
+
+def _resume_location_ok(resume_file: Path) -> bool:
+    """Where a résumé PDF may be read from: the home folder, the temp folder, or a removable /
+    external drive. Uses real path containment, not string prefixes (``/Users/al`` must not
+    allow ``/Users/alex``), and resolves symlinks on both sides (macOS ``/var`` -> ``/private/var``)."""
+    if os.name == "nt":
+        windir = Path(os.environ.get("WINDIR", r"C:\Windows")).resolve()
+        # any drive (OneDrive, D:, USB sticks), except system folders
+        return not resume_file.is_relative_to(windir)
+    for root in _resume_roots():
+        try:
+            if resume_file.is_relative_to(root.resolve()):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 # ── Profile: Parse Resume ─────────────────────────────────────────────────
 @app.post("/profile/parse-resume")
 async def parse_resume_to_profile():
@@ -2456,9 +2490,8 @@ async def parse_resume_to_profile():
         return {"success": False, "message": f"Resume file not found: {resume_path}"}
     if resume_file.suffix.lower() != ".pdf":
         return {"success": False, "message": "Resume must be a PDF file."}
-    home = Path.home()
-    if not (str(resume_file).startswith(str(home)) or str(resume_file).startswith("/tmp")):
-        return {"success": False, "message": "Resume path must be within your home directory."}
+    if not _resume_location_ok(resume_file):
+        return {"success": False, "message": "Resume must be in your home folder, a temp folder or an external drive."}
 
     try:
         from core.pdf_io import extract_text

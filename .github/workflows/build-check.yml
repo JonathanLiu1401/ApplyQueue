@@ -116,3 +116,18 @@ jobs:
           cargo install tauri-driver --locked
           APPLYQUEUE_TAURI_APP="$PWD/src-tauri/target/${{ matrix.target }}/release/app" \
             xvfb-run -a uv run pytest tests/webdriver -q -x -p no:cacheprovider
+      - name: Real Tauri app over WebDriver (Windows, experimental)
+        # tauri-driver + msedgedriver matching the installed WebView2 runtime (msedgedriver-tool).
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: bash
+        env:
+          UV_PYTHON_PREFERENCE: only-managed
+        run: |
+          cargo install tauri-driver --locked
+          cargo install --git https://github.com/chippers/msedgedriver-tool
+          (cd "$RUNNER_TEMP" && msedgedriver-tool)
+          export APPLYQUEUE_NATIVE_DRIVER="$RUNNER_TEMP/msedgedriver.exe"
+          export APPLYQUEUE_TAURI_APP="$PWD/src-tauri/target/${{ matrix.target }}/release/app.exe"
+          ls -la "$APPLYQUEUE_NATIVE_DRIVER" "$APPLYQUEUE_TAURI_APP"
+          uv run pytest tests/webdriver -q -x -rA -s -p no:cacheprovider

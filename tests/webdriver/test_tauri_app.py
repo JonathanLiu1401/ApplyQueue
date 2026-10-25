@@ -84,7 +84,10 @@ def app(tmp_path):
     data = tmp_path / "Alex Example ü data"
     env = dict(os.environ, APPLYQUEUE_DATA_DIR=str(data))
     log = open(tmp_path / "tauri-driver.log", "wb")
-    drv = subprocess.Popen([DRIVER, "--port", "4444"], env=env, stdout=log, stderr=subprocess.STDOUT)
+    cmd = [DRIVER, "--port", "4444"]
+    if os.environ.get("APPLYQUEUE_NATIVE_DRIVER"):  # Windows: msedgedriver matching the WebView2 runtime
+        cmd += ["--native-driver", os.environ["APPLYQUEUE_NATIVE_DRIVER"]]
+    drv = subprocess.Popen(cmd, env=env, stdout=log, stderr=subprocess.STDOUT)
     try:
         for _ in range(100):
             if _port_open(4444):
@@ -107,6 +110,7 @@ def app(tmp_path):
         except subprocess.TimeoutExpired:
             drv.kill()
         log.close()
+        print((tmp_path / "tauri-driver.log").read_text(errors="replace")[-3000:])
         # the sidecar watches its parent and exits; give it a moment so the next test can bind
         for _ in range(60):
             if not _port_open(8743):
@@ -120,7 +124,9 @@ def test_packaged_app_wizard_and_quick_start(app, tmp_path):
     s.find("//*[contains(text(), 'Welcome to ApplyQueue')]", timeout=120)
     token = (data / ".api_token").read_text().strip()
     auth = {"Authorization": f"Bearer {token}"}
-    assert _req("GET", f"{SIDECAR}/health")["status"] in ("ok", "healthy")
+    health = _req("GET", f"{SIDECAR}/health")
+    # "degraded" only means an optional dependency (e.g. Chromium for applying) is not installed yet
+    assert health.get("app") == "applyqueue" and health["status"] in ("ok", "healthy", "degraded"), health
     # 2. Deep wizard: Welcome -> AI provider (local) -> Resume (skip) -> Review -> Finish
     s.click("//button[contains(., \"Let's Go\")]")
     s.click("//*[@data-testid='ai-mode-local']")

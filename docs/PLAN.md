@@ -207,7 +207,9 @@ M1 checklist (updated with each M1 commit):
   manual dispatch.
 - [x] i18n: `src/locales/*/jobs.json` un-ignored; it/zh `jobs.json` added (vitest parity passes).
 - [x] `uv.lock` committed (CI `--frozen`); Dependabot monthly + grouped (it came with upstream).
-- [x] CI green: Linux + Windows on push; macOS ARM64 (build + tests) and macOS x64 (tests, `macos-15-intel`; `macos-13` is retired) via dispatch.
+- [x] CI green: Linux + Windows on push; macOS ARM64 build + tests via dispatch.
+- [ ] macOS x64 blocked: `pymupdf` 2.0 pulls `onnxruntime` 1.31, which has no macOS x86_64 wheel
+  (upstream's macOS-x64 release target is affected too). It's fixed by the PyMuPDF replacement (M2).
 - [ ] Rolled to M2: telemetry off by default; CSP; PyMuPDF replacement; rename (above).
 
 ## 6. Guardrails (unchanged)

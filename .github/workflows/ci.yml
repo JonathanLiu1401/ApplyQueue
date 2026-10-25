@@ -29,7 +29,7 @@ jobs:
           curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar xz gitleaks
           ./gitleaks git --redact --no-banner --exit-code 1 .
           ./gitleaks dir --redact --no-banner --exit-code 1 --max-target-megabytes 5 .
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Personal-data scan (generic rules + hashed denylist)
@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: npm licenses (from package-lock.json)

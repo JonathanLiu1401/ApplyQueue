@@ -91,8 +91,15 @@ def test_deep_setup_wizard(world):
     page.get_by_role("button", name=re.compile("Auto-Fill|Auto-fill")).click()
     page.get_by_text(re.compile("Next", re.I)).last.wait_for()
     page.wait_for_function("() => !document.body.innerText.includes('Parsing')", timeout=60000)
+    # a cold PyInstaller sidecar on a slow runner (Intel Mac) can still be parsing here
+    try:
+        _until(lambda: st.api("GET", "/profile")["name"] == PROFILE["name"], timeout=120)
+    except AssertionError:
+        raise AssertionError("auto-fill never saved the profile; sidecar log tail:\n"
+                             + st.log.read_text(errors="replace")[-4000:]
+                             + "\n--- page ---\n" + page.inner_text("body")[:2000])
     prof = st.api("GET", "/profile")
-    assert prof["name"] == PROFILE["name"] and prof["email"] == PROFILE["email"], prof
+    assert prof["email"] == PROFILE["email"], prof
     assert world["llm"].prompts and "Example Labs" in world["llm"].prompts[-1]
     page.get_by_role("button", name="Next").click()
     page.get_by_role("button", name="Next").click()

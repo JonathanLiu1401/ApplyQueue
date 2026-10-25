@@ -21,7 +21,7 @@ jobs:
     env:
       GITLEAKS_VERSION: 8.30.1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: gitleaks (all commits + working tree)
@@ -29,7 +29,7 @@ jobs:
           curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar xz gitleaks
           ./gitleaks git --redact --no-banner --exit-code 1 .
           ./gitleaks dir --redact --no-banner --exit-code 1 --max-target-megabytes 5 .
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Personal-data scan (generic rules + hashed denylist)
@@ -42,13 +42,13 @@ jobs:
     name: Dependency licenses (npm + Python)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: npm licenses (from package-lock.json)
         run: node scripts/license-check.mjs
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
       - name: Python licenses (sidecar deps)
         run: |
           uv sync --frozen --python 3.13

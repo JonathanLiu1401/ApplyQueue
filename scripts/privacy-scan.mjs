@@ -44,6 +44,8 @@ const EMAIL = /[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+\.)+[A-Za-z]{2,}/g;
 const EMAIL_ALLOW = /@((.+\.)?example\.(com|org|net)|users\.noreply\.github\.com|localhost|test\.invalid)$/i;
 const PHONE = /(?<![\w.+-])(\+?1[ .-]?)?\(?\d{3}\)?[ .-]\d{3}[ .-]\d{4}(?![\w-])/g;
 const PHONE_ALLOW = /555[ .-]?01\d\d$/;
+// Lockfiles carry third-party package metadata (e.g. npm maintainers' public emails).
+const GENERIC_SKIP = /(^|\/)pnpm-lock\.yaml$/;
 
 const denylist = new Set(
   [process.env.PRIVACY_DENYLIST_SHA256 ?? "", process.env.PRIVACY_DENYLIST_FILE ? readFileSync(process.env.PRIVACY_DENYLIST_FILE, "utf8") : ""]
@@ -123,7 +125,7 @@ for (const [oid, path] of seenBlobs) {
   if (buf.includes(0)) continue; // binary
   const text = buf.toString("utf8");
   scanned++;
-  for (const r of new Set(genericHits(text))) add(r, `${path} (blob ${oid.slice(0, 8)})`);
+  if (!GENERIC_SKIP.test(path)) for (const r of new Set(genericHits(text))) add(r, `${path} (blob ${oid.slice(0, 8)})`);
   const d = denyHits(text);
   if (d) add("denylist", `${path} (blob ${oid.slice(0, 8)}, ${d} hit${d > 1 ? "s" : ""})`);
 }

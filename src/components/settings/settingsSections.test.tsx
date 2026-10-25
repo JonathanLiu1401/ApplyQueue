@@ -89,6 +89,22 @@ describe("EmailAccountsSection", () => {
     await waitFor(() => expect(shellOpen).toHaveBeenCalledWith("https://accounts.example.com/auth?state=s"));
   });
 
+  it("shows Reconnect for a revoked sign-in (backend reports linked=false)", async () => {
+    vi.mocked(api.getEmailStatus).mockResolvedValue({
+      providers: {
+        gmail: mailStatus({ linked: false, configured: false }),
+        outlook: mailStatus({ provider: "outlook", name: "Outlook", linked: false, needs_reauth: true, reauth_due: true, last_error: "invalid_grant" }),
+      },
+      settings, last_sweep: { at: null, summary: null },
+    } as never);
+    render(<EmailAccountsSection />);
+    expect(await screen.findByText("The sign-in expired or was revoked.")).toBeInTheDocument();
+    expect(screen.getByText("Reconnect needed")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+    expect(api.connectEmail).toHaveBeenCalledWith("outlook");
+  });
+
   it("saves labels and runs a sweep", async () => {
     vi.mocked(api.getEmailStatus).mockResolvedValue({
       providers: { gmail: mailStatus(), outlook: mailStatus({ provider: "outlook", name: "Outlook", linked: false }) },

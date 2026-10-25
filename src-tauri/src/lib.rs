@@ -7,7 +7,16 @@ struct Backend(Mutex<Option<CommandChild>>);
 
 #[tauri::command]
 fn get_api_token() -> Result<String, String> {
-    let base = if cfg!(target_os = "macos") {
+    // Same override the sidecar honours (config.get_data_dir); without it the shell read a
+    // token from the default dir while the sidecar wrote it elsewhere, and every call got 401.
+    let override_dir = std::env::var("APPLYQUEUE_DATA_DIR")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from);
+    let base = if let Some(dir) = override_dir {
+        Some(dir)
+    } else if cfg!(target_os = "macos") {
         // Must match backend/core/config.py get_data_dir() (APP_DIR_NAME).
         dirs::home_dir().map(|h| h.join("Library/Application Support/applyqueue"))
     } else if cfg!(target_os = "windows") {

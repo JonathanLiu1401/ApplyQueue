@@ -356,7 +356,7 @@ function Input({ label, value, onChange, type = "text", className = "", placehol
     <div className={className}>
       <label className="block text-sm font-semibold text-foreground mb-1.5">{label}</label>
       <input type={type} value={value} onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder} className="input-base" />
+        placeholder={placeholder} className="input-base" aria-label={label} />
     </div>
   );
 }

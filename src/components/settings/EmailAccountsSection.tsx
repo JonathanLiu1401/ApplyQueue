@@ -61,7 +61,10 @@ function ProviderCard({ st, onChange }: { st: EmailProviderStatus; onChange: () 
       await openExternal(url);
     });
 
-  const reauth = st.linked && (st.needs_reauth || st.reauth_due);
+  // The backend reports linked=false once a sign-in is revoked (needs_reauth), so key the
+  // reconnect prompt off needs_reauth itself, not linked && needs_reauth (which never showed).
+  const reauth = st.needs_reauth || (st.linked && st.reauth_due);
+  const usable = st.linked && !reauth;
 
   return (
     <div className="p-3 border border-border rounded-lg" data-testid={`mail-${st.provider}`}>
@@ -69,10 +72,10 @@ function ProviderCard({ st, onChange }: { st: EmailProviderStatus; onChange: () 
         <div className="flex items-center gap-2">
           <Mail className="w-4 h-4 text-muted-foreground" />
           <span className="text-sm font-semibold text-foreground">{st.name}</span>
-          {st.linked && <span className="text-[12px] text-muted-foreground">{st.email}</span>}
+          {(st.linked || st.needs_reauth) && <span className="text-[12px] text-muted-foreground">{st.email}</span>}
         </div>
-        <span className={`text-[11px] px-1.5 py-0.5 rounded ${st.linked && !reauth ? "bg-green-500/10 text-green-600" : "bg-secondary text-muted-foreground"}`}>
-          {st.linked ? (reauth ? "Reconnect needed" : "Connected") : st.configured ? "Not connected" : "Not set up"}
+        <span className={`text-[11px] px-1.5 py-0.5 rounded ${usable ? "bg-green-500/10 text-green-600" : "bg-secondary text-muted-foreground"}`}>
+          {reauth ? "Reconnect needed" : st.linked ? "Connected" : st.configured ? "Not connected" : "Not set up"}
         </span>
       </div>
 
@@ -125,7 +128,7 @@ function ProviderCard({ st, onChange }: { st: EmailProviderStatus; onChange: () 
         </div>
       ) : (
         <div className="flex gap-2 mt-2">
-          {!st.linked && (
+          {!st.linked && !reauth && (
             <button className="btn-primary" disabled={!st.configured} onClick={connect}>Connect</button>
           )}
           {waiting && !st.linked && (
@@ -133,7 +136,7 @@ function ProviderCard({ st, onChange }: { st: EmailProviderStatus; onChange: () 
               <RefreshCw className="w-4 h-4" /> I finished signing in
             </button>
           )}
-          {st.linked && <button className="btn-secondary" onClick={() => run(() => disconnectEmail(st.provider))}>Disconnect</button>}
+          {(st.linked || st.needs_reauth) && <button className="btn-secondary" onClick={() => run(() => disconnectEmail(st.provider))}>Disconnect</button>}
           <button className="btn-secondary" onClick={() => setEditing(true)}>Edit client</button>
         </div>
       )}

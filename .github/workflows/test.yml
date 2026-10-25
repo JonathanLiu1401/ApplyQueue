@@ -155,6 +155,14 @@ jobs:
         if: runner.os == 'Windows'
         run: powershell -ExecutionPolicy Bypass -File scripts/build-backend.ps1
 
+      # ── UI end to end against the PACKAGED sidecar (M8) ──────────────
+      - name: UI e2e (production frontend + packaged sidecar)
+        shell: bash
+        run: |
+          EXT=""; [ "$RUNNER_OS" = "Windows" ] && EXT=".exe"
+          APPLYQUEUE_SIDECAR="$PWD/src-tauri/binaries/applyqueue-backend-${{ matrix.target }}$EXT" \
+            uv run pytest tests/ui_e2e -q -rs
+
       # ── Integration Tests (Built Binary) ─────────────────────────────
       - name: Run integration tests (binary, Unix)
         if: runner.os != 'Windows' && env.TEST_OPENROUTER_API_KEY != ''
@@ -211,6 +219,10 @@ jobs:
         run: src-tauri/binaries/applyqueue-backend-x86_64-apple-darwin --self-test
       - name: Bundle Tauri app (x86_64, unsigned)
         run: npx tauri build --target x86_64-apple-darwin --bundles app,dmg
+      - name: UI e2e (production frontend + packaged x86_64 sidecar)
+        run: |
+          APPLYQUEUE_SIDECAR="$PWD/src-tauri/binaries/applyqueue-backend-x86_64-apple-darwin" \
+            uv run pytest tests/ui_e2e -q -rs
       - name: Launch packaged app and check /health
         run: |
           APP=$(ls -d src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app | head -1)

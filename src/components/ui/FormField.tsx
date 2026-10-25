@@ -35,6 +35,7 @@ export function InputField({ label, value, onChange, type = "text", placeholder,
         placeholder={placeholder}
         disabled={disabled}
         className="input-base"
+        aria-label={label}
       />
     </FormField>
   );

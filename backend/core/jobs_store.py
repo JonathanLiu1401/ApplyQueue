@@ -104,10 +104,27 @@ def mark_submit_click(url: str) -> bool:
 
 def _pid_alive(pid) -> bool:
     try:
-        import psutil
-        return bool(pid) and psutil.pid_exists(int(pid))
-    except Exception:
+        pid = int(pid or 0)
+    except (TypeError, ValueError):
         return False
+    if pid <= 0:
+        return False
+    try:
+        import psutil
+    except ImportError:  # psutil is a transitive dependency; never treat live claims as dead without it
+        if os.name == "nt":
+            return True  # cannot tell: err on the side of not stealing (stale window still applies)
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+    try:
+        return psutil.pid_exists(pid)
+    except Exception:
+        return True
 
 
 def claim_is_live(job: dict, now: datetime | None = None) -> bool:

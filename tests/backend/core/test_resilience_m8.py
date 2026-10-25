@@ -3,8 +3,10 @@ profiles, submit guards. Each test pins a bug that was fixed in M8 (see TEST_REP
 import json
 import os
 import socket
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -28,6 +30,14 @@ def _seed(d, **job):
     (d / "jobs.json").write_text(json.dumps({URL: {"url": URL, "status": "pending", **job}}), "utf-8")
 
 
+def _wait_dead(pid, timeout=10.0):
+    if not pid:
+        return
+    end = time.time() + timeout
+    while time.time() < end and jobs_store._pid_alive(pid):
+        time.sleep(0.1)
+
+
 def _child(d, code):
     env = {**os.environ, "APPLYQUEUE_DATA_DIR": str(d), "PYTHONPATH": os.pathsep.join([str(ROOT), str(ROOT / "backend")])}
     return subprocess.Popen([sys.executable, "-c", code], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -38,15 +48,15 @@ import os, signal, time
 from core import jobs_store
 assert jobs_store.claim_job(%r)
 jobs_store.mark_submit_click(%r)
-print("clicked", flush=True)
+print("clicked", os.getpid(), flush=True)
 time.sleep(60)
 """ % (URL, URL)
 
 KILLED_BEFORE_SUBMIT = """
-import time
+import os, time
 from core import jobs_store
 assert jobs_store.claim_job(%r)
-print("claimed", flush=True)
+print("claimed", os.getpid(), flush=True)
 time.sleep(60)
 """ % URL
 
@@ -56,15 +66,24 @@ def test_process_killed_mid_apply_never_resubmits(aq_data_dir, code, expect):
     _seed(aq_data_dir)
     p = _child(aq_data_dir, code)
     try:
-        assert p.stdout.readline().strip() in (b"clicked", b"claimed"), p.stderr.read()
+        line = p.stdout.readline().split()
+        assert line and line[0] in (b"clicked", b"claimed"), p.stderr.read()
+        # The real interpreter pid: on Windows a venv python.exe is a launcher that spawns it.
+        child_pid = int(line[1])
         job = _jobs(aq_data_dir)[URL]
-        assert job["status"] == js.IN_PROGRESS and job["claimed_pid"] == p.pid
+        assert job["status"] == js.IN_PROGRESS and job["claimed_pid"] == child_pid
         # Another instance starting while the first is alive must not steal its job.
         jobs = _jobs(aq_data_dir)
         assert jobs_store.recover_stale_claims(jobs) == (0, 0) and jobs[URL]["status"] == js.IN_PROGRESS
     finally:
+        if "child_pid" in locals() and child_pid != p.pid:
+            try:
+                os.kill(child_pid, signal.SIGTERM)  # TerminateProcess on Windows
+            except OSError:
+                pass
         p.kill()
         p.wait()
+    _wait_dead(locals().get("child_pid"))
     jobs = _jobs(aq_data_dir)
     requeued, flagged = jobs_store.recover_stale_claims(jobs)
     assert jobs[URL]["status"] == expect

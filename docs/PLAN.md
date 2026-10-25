@@ -204,10 +204,11 @@ M1 checklist (updated with each M1 commit):
 - [x] Sidecar binary + `tauri build` (deb/AppImage) on Linux; app + sidecar smoke-run under xvfb.
 - [ ] Rename to ApplyQueue (identifier, data-dir migration, sidecar name).
 - [x] CI app builds (`build-check.yml`): Linux + Windows on path-filtered push/PR, macOS ARM64 on
-  manual dispatch. First CI run pending (not yet verified green).
+  manual dispatch.
 - [x] i18n: `src/locales/*/jobs.json` un-ignored; it/zh `jobs.json` added (vitest parity passes).
 - [x] `uv.lock` committed (CI `--frozen`); Dependabot monthly + grouped (it came with upstream).
-- [ ] Telemetry off by default; CSP; PyMuPDF replacement.
+- [x] CI green: Linux + Windows on push; macOS ARM64 (build + tests) and macOS x64 (tests, `macos-15-intel`; `macos-13` is retired) via dispatch.
+- [ ] Rolled to M2: telemetry off by default; CSP; PyMuPDF replacement; rename (above).
 
 ## 6. Guardrails (unchanged)
 Private repo only; no GitHub fork; no upstream PRs, publishing, domains, or npm names without

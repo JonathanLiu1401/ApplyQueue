@@ -62,7 +62,7 @@ jobs:
       - id: m
         run: |
           base='[{"platform":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu","label":"Linux-x64"},{"platform":"windows-latest","target":"x86_64-pc-windows-msvc","label":"Windows-x64"}'
-          mac=',{"platform":"macos-latest","target":"aarch64-apple-darwin","label":"macOS-ARM64"},{"platform":"macos-13","target":"x86_64-apple-darwin","label":"macOS-x64"}'
+          mac=',{"platform":"macos-latest","target":"aarch64-apple-darwin","label":"macOS-ARM64"},{"platform":"macos-15-intel","target":"x86_64-apple-darwin","label":"macOS-x64"}'
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.run_macos }}" = "true" ]; then
             echo "include=${base}${mac}]" >> "$GITHUB_OUTPUT"
           else

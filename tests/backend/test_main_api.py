@@ -901,3 +901,63 @@ class TestSyncApi:
         assert auth_client.post("/sync/key", json={"key": k}).json()["success"]
         assert auth_client.post("/sync/unlink").json()["success"]
         assert auth_client.post("/sync/now").status_code == 400
+
+
+class TestLocalModelsApi:
+    """M6 endpoints against mocked local runtimes."""
+
+    @pytest.fixture
+    def ollama(self, tmp_path, monkeypatch):
+        import sys as _sys
+        from pathlib import Path as _P
+        _sys.path.insert(0, str(_P(__file__).resolve().parents[1] / "fixtures"))
+        from mock_local_llm import MockRuntime, dead_url
+        from core.local_models import detect
+        rt = MockRuntime("ollama", ["qwen3-vl:4b"], vision={"qwen3-vl:4b"})
+        dead = dead_url()
+        monkeypatch.setattr(detect, "default_endpoints", lambda: {
+            "ollama": rt.base, "lmstudio": dead, "llamacpp": dead, "openai": dead})
+        monkeypatch.setenv("APPLYQUEUE_GGUF_DIRS", str(tmp_path))
+        yield rt
+        rt.close()
+
+    def test_overview(self, auth_client, ollama):
+        r = auth_client.get("/local-models").json()
+        assert [x["id"] for x in r["runtimes"]] == ["ollama"]
+        assert r["runtimes"][0]["models"][0]["vision"] is True
+        assert r["hardware"]["ram_bytes"] >= 0 and r["expectations"]
+        assert "speed_note" in r["recommendation"]
+
+    def test_pull_and_use(self, auth_client, ollama):
+        import time
+        r = auth_client.post("/local-models/pull", json={"model": "qwen3-vl:8b"}).json()
+        assert r["success"]
+        for _ in range(50):
+            job = auth_client.get(f"/local-models/pull/{r['job']['id']}").json()["job"]
+            if job["state"] != "running":
+                break
+            time.sleep(0.05)
+        assert job["state"] == "done" and ollama.pulls == ["qwen3-vl:8b"]
+        assert auth_client.post("/local-models/pull", json={"model": "../x"}).status_code == 400
+        assert auth_client.get("/local-models/pull/nope").status_code == 404
+
+        u = auth_client.post("/local-models/use", json={"runtime": "ollama", "base_url": ollama.base,
+                                                        "model": "qwen3-vl:8b"}).json()
+        assert u["provider"] == "ollama"
+        llm = auth_client.get("/settings/llm").json()
+        assert llm["provider"] == "ollama" and llm["ollama"]["model"] == "qwen3-vl:8b"
+        assert auth_client.get("/settings").json()["agent_backend"] == "browser_use"
+
+    def test_use_openai_compatible_and_validation(self, auth_client, ollama):
+        u = auth_client.post("/local-models/use", json={"runtime": "lmstudio", "base_url": "http://127.0.0.1:1234",
+                                                        "model": "google/gemma-3-12b"}).json()
+        assert u["provider"] == "openai_compatible"
+        assert auth_client.post("/local-models/use", json={"runtime": "ollama", "base_url": "file:///etc",
+                                                           "model": "x"}).status_code == 400
+        assert auth_client.post("/local-models/use", json={"runtime": "nope", "base_url": "http://127.0.0.1:1",
+                                                           "model": "x"}).status_code == 400
+
+    def test_pull_when_ollama_missing(self, auth_client, ollama, monkeypatch):
+        from mock_local_llm import dead_url
+        r = auth_client.post("/local-models/pull", json={"model": "qwen3-vl:2b", "base_url": dead_url()}).json()
+        assert r["success"] is False and "ollama.com" in r["message"]

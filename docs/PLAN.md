@@ -330,6 +330,20 @@ M1 checklist (updated with each M1 commit):
 - [x] Tests: local bare remote + mocked GitHub API (`tests/fixtures/mock_github.py`).
 - Setup notes: `docs/applyqueue/SYNC_SETUP.md`.
 
+### 5.5 M6 status (local models)
+- [x] Detection (`backend/core/local_models/detect.py`): Ollama (`/api/tags`, vision from
+  `/api/show` capabilities, `OLLAMA_HOST`), LM Studio (`/api/v0/models` type `vlm`, falls back to
+  `/v1/models`), llama.cpp server (`/props` modalities), generic OpenAI-compatible servers, and
+  GGUF files in the Hugging Face / LM Studio / llama.cpp caches (`mmproj` = vision).
+- [x] Hardware probe (RAM, NVIDIA/AMD VRAM, Apple silicon vs Intel Mac) → memory budget →
+  largest vision model that fits (Qwen3-VL / Gemma 3 catalog). CPU-only machines, Intel Macs
+  included, are capped at small models with an honest "leave it running overnight" note.
+- [x] One-click Ollama pull with progress; "Use" sets the provider (Ollama or OpenAI-compatible)
+  and the browser-use backend. Honest-expectations list shown in Settings and onboarding.
+- [x] Onboarding step 1: "Run 100% locally, no subscription". README headline.
+- [x] Tests with mocked runtimes (`tests/fixtures/mock_local_llm.py`). Notes:
+  `docs/applyqueue/LOCAL_MODELS.md`.
+
 ## 6. Guardrails (unchanged)
 Private repo only; no GitHub fork; no upstream PRs, publishing, domains, or npm names without
 Art's approval; no Cursor cloud agents; no secrets or personal data in the repo. Fixtures use

@@ -22,7 +22,7 @@ if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--mcp-server
     from core import mcp_server as _mcp_server
     sys.exit(_mcp_server.main(sys.argv[2:]))
 
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -586,6 +586,88 @@ async def list_ollama_models(body: dict):
             return {"success": True, "models": models}
     except Exception as e:
         return {"success": False, "models": [], "message": str(e)}
+
+
+# ── Local models (M6) ─────────────────────────────────────────────────────
+def _local_models():
+    try:
+        from core.local_models import catalog, detect, hardware, pull
+    except ImportError:  # pragma: no cover
+        from backend.core.local_models import catalog, detect, hardware, pull
+    return catalog, detect, hardware, pull
+
+
+@app.get("/local-models")
+async def local_models_overview():
+    """Detected runtimes + hardware + a vision-model recommendation (all local probes)."""
+    catalog, detect, hardware, _ = _local_models()
+    found, hw = await asyncio.gather(asyncio.to_thread(detect.detect), asyncio.to_thread(hardware.probe))
+    budget = hardware.memory_budget(hw)
+    rec = catalog.recommend(budget)
+    installed = {m["id"] for r in found["runtimes"] if r["id"] == "ollama" for m in r["models"]}
+    for m in [rec["model"], *rec["alternatives"]]:
+        if m:
+            m["installed"] = m["id"] in installed or f"{m['id']}:latest" in installed
+    llm = load_llm_settings()
+    return {**found, "hardware": {**hw, "budget_bytes": budget["bytes"], "where": budget["where"]},
+            "recommendation": rec, "expectations": catalog.EXPECTATIONS, "catalog": catalog.CATALOG,
+            "current": {"provider": llm.get("provider"), "ollama": llm.get("ollama") or {},
+                        "openai_compatible": {k: v for k, v in (llm.get("openai_compatible") or {}).items()
+                                              if k != "api_key"}}}
+
+
+def _local_base(url: str) -> str:
+    from urllib.parse import urlparse
+    u = urlparse((url or "").strip())
+    if u.scheme not in ("http", "https") or not u.hostname:
+        raise HTTPException(400, "base_url must be an http(s) URL")
+    return f"{u.scheme}://{u.netloc}".rstrip("/")
+
+
+@app.post("/local-models/pull")
+async def local_models_pull(body: dict):
+    _, detect, _, pull = _local_models()
+    model = str(body.get("model") or "").strip()
+    if not pull.valid_model(model):
+        raise HTTPException(400, "Invalid model name")
+    base = _local_base(body.get("base_url") or detect.default_endpoints()["ollama"])
+    if not await asyncio.to_thread(detect.probe_ollama, base):
+        return {"success": False, "message": "Ollama is not running. Install it from ollama.com and open it, then retry."}
+    return {"success": True, "job": pull.start(base, model)}
+
+
+@app.get("/local-models/pull/{job_id}")
+async def local_models_pull_status(job_id: str):
+    _, _, _, pull = _local_models()
+    job = pull.get(job_id)
+    if not job:
+        raise HTTPException(404, "Unknown download")
+    return {"success": True, "job": job}
+
+
+@app.post("/local-models/use")
+async def local_models_use(body: dict):
+    """Point the built-in agent at a local model and select it (no API key, no subscription)."""
+    runtime = str(body.get("runtime") or "ollama")
+    model = str(body.get("model") or "").strip()
+    if not model or len(model) > 200:
+        raise HTTPException(400, "model is required")
+    base = _local_base(body.get("base_url") or "")
+    llm = load_llm_settings()
+    if runtime == "ollama":
+        llm["provider"] = "ollama"
+        llm["ollama"] = {**(llm.get("ollama") or {}), "base_url": base, "model": model}
+    elif runtime in ("lmstudio", "llamacpp", "openai"):
+        llm["provider"] = "openai_compatible"
+        llm["openai_compatible"] = {"base_url": f"{base}/v1", "model": model, "api_key": "",
+                                    "local_runtime": runtime}
+    else:
+        raise HTTPException(400, "Unknown runtime")
+    save_llm_settings(llm)
+    settings = load_settings()
+    settings["agent_backend"] = "browser_use"
+    save_settings(settings)
+    return {"success": True, "provider": llm["provider"]}
 
 
 # ── App Settings ──────────────────────────────────────────────────────────

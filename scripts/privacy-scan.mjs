@@ -48,7 +48,8 @@ const BAD_PATH = [
   /^(?!src\/locales\/).*(^|\/)(profile|knowledge|answers|accounts)\.json$/,
 ];
 const EMAIL = /[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+\.)+[A-Za-z]{2,}/g;
-const EMAIL_ALLOW = /@((.+\.)?example\.(com|org|net)|users\.noreply\.github\.com|localhost|test\.invalid)$/i;
+// RFC 2606 reserved names (example.*, .invalid, .test, .localhost) can never be real mailboxes.
+const EMAIL_ALLOW = /@((.+\.)?example\.(com|org|net)|users\.noreply\.github\.com|localhost|(.+\.)?(invalid|test|localhost))$/i;
 const EMAIL_FALSE = /@\d+x\.(png|jpe?g|webp|svg)$/i; // retina asset names like icon@2x.png
 // GitHub service addresses (web-flow committer, Dependabot PR bodies): not personal data.
 const EMAIL_SERVICE = /^(noreply|support)@github\.com$/i;

@@ -38,6 +38,9 @@ vi.mock("../lib/analytics", () => ({
 vi.mock("./forms/LLMSettingsForm", () => ({
   default: () => <div data-testid="llm-settings-form" />,
 }));
+vi.mock("./settings/LocalModelsSection", () => ({
+  LocalModelsPanel: () => <div data-testid="local-models-panel" />,
+}));
 vi.mock("./forms/ResumePickerForm", () => ({
   default: () => <div data-testid="resume-picker-form" />,
 }));
@@ -88,6 +91,15 @@ describe("SetupWizard", () => {
     renderWizard({ initialStep: 1 });
     expect(screen.getByText("llmStep.heading")).toBeInTheDocument();
     expect(screen.getByTestId("llm-settings-form")).toBeInTheDocument();
+  });
+
+  it("offers a 100% local path with no subscription", async () => {
+    const user = userEvent.setup();
+    renderWizard({ initialStep: 1 });
+    expect(screen.getByText("Run 100% locally, no subscription")).toBeInTheDocument();
+    await user.click(screen.getByTestId("ai-mode-local"));
+    expect(screen.getByTestId("local-models-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("llm-settings-form")).not.toBeInTheDocument();
   });
 
   it("calls onClose when the header X button is clicked", async () => {

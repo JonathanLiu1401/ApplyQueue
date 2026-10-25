@@ -658,3 +658,89 @@ export async function exportSyncKey() {
 export async function importSyncKey(key: string) {
   return request<{ success: boolean; kid: string }>("/sync/key", { method: "POST", body: JSON.stringify({ key }) });
 }
+
+// ── Local models (M6) ──────────────────────────────────────────────────
+export interface LocalModel {
+  id: string;
+  vision?: boolean;
+  size_bytes?: number;
+  loaded?: boolean;
+}
+
+export interface LocalRuntime {
+  id: "ollama" | "lmstudio" | "llamacpp" | "openai";
+  name: string;
+  base_url: string;
+  running: boolean;
+  version?: string;
+  models: LocalModel[];
+  can_pull: boolean;
+}
+
+export interface CatalogModel {
+  id: string;
+  family: string;
+  params: string;
+  size_gb: number;
+  hf: string;
+  quality: string;
+  installed?: boolean;
+}
+
+export interface LocalModelsOverview {
+  runtimes: LocalRuntime[];
+  gguf: { file: string; repo: string; vision: boolean; size_bytes: number; source: string }[];
+  binaries: Record<string, boolean>;
+  hardware: {
+    os: string;
+    arch: string;
+    apple_silicon: boolean;
+    intel_mac: boolean;
+    ram_bytes: number;
+    gpus: { vendor: string; name: string; vram_bytes: number }[];
+    budget_bytes: number;
+    where: string;
+  };
+  recommendation: {
+    model: CatalogModel | null;
+    alternatives: CatalogModel[];
+    speed: "fast" | "good" | "slow";
+    speed_note: string;
+    warnings: string[];
+  };
+  expectations: string[];
+  catalog: CatalogModel[];
+  current: { provider: string; ollama: { base_url?: string; model?: string } };
+}
+
+export interface PullJob {
+  id: string;
+  model: string;
+  state: "running" | "done" | "error";
+  status: string;
+  completed: number;
+  total: number;
+  error: string;
+}
+
+export async function getLocalModels() {
+  return request<LocalModelsOverview>("/local-models");
+}
+
+export async function pullLocalModel(model: string, base_url?: string) {
+  return request<{ success: boolean; job?: PullJob; message?: string }>("/local-models/pull", {
+    method: "POST",
+    body: JSON.stringify({ model, base_url }),
+  });
+}
+
+export async function getPullStatus(id: string) {
+  return request<{ success: boolean; job: PullJob }>(`/local-models/pull/${encodeURIComponent(id)}`);
+}
+
+export async function selectLocalModel(runtime: string, base_url: string, model: string) {
+  return request<{ success: boolean; provider: string }>("/local-models/use", {
+    method: "POST",
+    body: JSON.stringify({ runtime, base_url, model }),
+  });
+}

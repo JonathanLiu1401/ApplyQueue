@@ -18,6 +18,18 @@
 OpenRouter, OpenAI-compatible) · **local models with no subscription** (Ollama, LM Studio,
 llama.cpp, Hugging Face).
 
+## Run 100% locally, no subscription
+
+Pick **"Run 100% locally"** in the setup wizard. ApplyQueue finds Ollama, LM Studio, llama.cpp,
+or GGUF models you already downloaded, checks your RAM and GPU, recommends a vision model that
+fits, and downloads it with one click. Nothing leaves your computer except the job sites
+themselves.
+
+Be realistic: on a gaming GPU an application takes a few minutes; on a CPU-only laptop (Intel
+Macs included) it can take 15-45 minutes, so queue jobs and leave it running overnight. Small
+models make more mistakes, so start in review-first mode. See
+[docs/applyqueue/LOCAL_MODELS.md](docs/applyqueue/LOCAL_MODELS.md).
+
 ## What ApplyQueue adds on top of LangHire
 
 | | LangHire (upstream) | ApplyQueue |

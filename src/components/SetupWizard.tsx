@@ -26,6 +26,7 @@ import { trackEvent } from "../lib/analytics";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import LLMSettingsForm from "./forms/LLMSettingsForm";
+import { LocalModelsPanel } from "./settings/LocalModelsSection";
 import ResumePickerForm from "./forms/ResumePickerForm";
 
 interface SetupWizardProps {
@@ -45,6 +46,7 @@ const STEPS = [
 export default function SetupWizard({ onClose, onNavigateAway, initialStep = 0 }: SetupWizardProps) {
   const { t } = useTranslation("wizard");
   const [step, setStep] = useState(initialStep);
+  const [aiMode, setAiMode] = useState<"cloud" | "local">("cloud");
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [parsing, setParsing] = useState(false);
   const [parseResult, setParseResult] = useState<{
@@ -178,7 +180,21 @@ export default function SetupWizard({ onClose, onNavigateAway, initialStep = 0 }
               <p className="text-sm text-muted-foreground mb-4">
                 {t("llmStep.description")}
               </p>
-              <LLMSettingsForm compact onSaved={fetchStatus} />
+              <div className="grid grid-cols-2 gap-2 mb-4" role="tablist">
+                <button role="tab" aria-selected={aiMode === "local"} data-testid="ai-mode-local"
+                  onClick={() => setAiMode("local")}
+                  className={`p-3 rounded-xl border text-left ${aiMode === "local" ? "border-primary bg-primary/5" : "border-border"}`}>
+                  <span className="block text-sm font-semibold text-foreground">Run 100% locally, no subscription</span>
+                  <span className="block text-xs text-muted-foreground">Free and private. Slower; best overnight.</span>
+                </button>
+                <button role="tab" aria-selected={aiMode === "cloud"} data-testid="ai-mode-cloud"
+                  onClick={() => setAiMode("cloud")}
+                  className={`p-3 rounded-xl border text-left ${aiMode === "cloud" ? "border-primary bg-primary/5" : "border-border"}`}>
+                  <span className="block text-sm font-semibold text-foreground">Use an API key or subscription</span>
+                  <span className="block text-xs text-muted-foreground">Faster and more accurate.</span>
+                </button>
+              </div>
+              {aiMode === "local" ? <LocalModelsPanel onUsed={fetchStatus} /> : <LLMSettingsForm compact onSaved={fetchStatus} />}
             </div>
           )}
 

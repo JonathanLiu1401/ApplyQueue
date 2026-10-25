@@ -1,0 +1,31 @@
+appId: io.github.jonathanliu1401.applyqueue
+productName: ApplyQueue
+copyright: Copyright (c) 2026 JobAutomation OSS contributors
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**
+  - package.json
+  - "!**/*.map"
+asar: true
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+    - target: zip
+  # Signing/notarization (M10) is configured via CI secrets; unsigned builds until then.
+  identity: null
+win:
+  target:
+    - target: nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+linux:
+  category: Utility
+  maintainer: ApplyQueue contributors
+  target:
+    - AppImage
+    - deb
+publish: null

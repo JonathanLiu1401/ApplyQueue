@@ -1,0 +1,20 @@
+{
+  "id": "nursing-new-grad",
+  "label": "Nursing new-grad",
+  "preferences": {
+    "schemaVersion": 1,
+    "roleType": "new-grad",
+    "categories": [
+      { "id": "rn-residency", "label": "RN residency", "priority": 1,
+        "include": ["nurse residency", "new grad rn", "graduate nurse"], "exclude": ["travel", "manager"] },
+      { "id": "rn-general", "label": "Registered nurse", "priority": 2,
+        "include": ["registered nurse", "rn"], "exclude": ["5+ years", "charge nurse"] }
+    ]
+  },
+  "answers": {
+    "schemaVersion": 1,
+    "bank": [
+      { "id": "age-18", "patterns": ["are you 18"], "answer": "Yes" }
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "id": "software-intern",
+  "label": "Software internships",
+  "preferences": {
+    "schemaVersion": 1,
+    "roleType": "internship",
+    "term": { "id": "summer-2027", "label": "Summer 2027", "start": "2027-06-01", "end": "2027-09-01" },
+    "categories": [
+      { "id": "swe", "label": "Software engineering", "priority": 1,
+        "include": ["software engineer", "software developer", "swe"], "exclude": ["senior", "staff", "principal"] },
+      { "id": "data", "label": "Data / ML", "priority": 2,
+        "include": ["data engineer", "machine learning", "data science"], "exclude": ["senior", "phd"] }
+    ],
+    "locations": { "include": ["US:*", "remote"] }
+  },
+  "answers": {
+    "schemaVersion": 1,
+    "bank": [
+      { "id": "age-18", "patterns": ["are you 18", "at least 18"], "answer": "Yes" },
+      { "id": "heard-about", "patterns": ["how did you hear"], "answer": "Company careers page" }
+    ]
+  }
+}

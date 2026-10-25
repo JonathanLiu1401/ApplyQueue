@@ -1,0 +1,27 @@
+{
+  "name": "applyqueue-monorepo",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Open-source desktop app that automates job applications with your AI agent",
+  "license": "MIT",
+  "packageManager": "pnpm@10.34.6",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "build": "pnpm --filter applyqueue run build",
+    "dist": "pnpm --filter applyqueue run dist",
+    "privacy-scan": "node scripts/privacy-scan.mjs",
+    "license-check": "node scripts/license-check.mjs",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm privacy-scan && pnpm license-check"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.13.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.13.0",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.0"
+  }
+}

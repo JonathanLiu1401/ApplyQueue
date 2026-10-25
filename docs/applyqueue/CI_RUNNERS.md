@@ -76,7 +76,9 @@ restarts the service. On an Apple silicon Mac it refuses unless you run
 `bash /tmp/aq-runner-setup.sh --allow-arm64` (labels `macOS, ARM64, apple-silicon`).
 Other flags: `--name`, `--skip-prereqs`, `--no-keep-awake`, `--token-stdin`, `--uninstall`.
 
-## Windows (one command)
+## Windows (one command, for a future machine)
+
+No Windows runner exists today (no Windows machine is available). This is ready for when one is.
 
 Open **PowerShell as administrator** (Start > type PowerShell > right-click > Run as
 administrator) and paste:

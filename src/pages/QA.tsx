@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useSafeTimeout } from "../hooks/useSafeTimeout";
 import { Search, Trash2, Merge, Sparkles, Zap, HelpCircle, X } from "lucide-react";
 import { getQAList, getQAStats, updateQA, deleteQA, mergeQA, autoSquashQA, smartSquashQA } from "../lib/api";
 import { trackEvent } from "../lib/analytics";
@@ -6,6 +7,7 @@ import type { QAEntry, QAStats } from "../lib/types";
 import { useTranslation } from "react-i18next";
 
 export default function QA() {
+  const later = useSafeTimeout();
   const { t } = useTranslation("qa");
   const [questions, setQuestions] = useState<QAEntry[]>([]);
   const [stats, setStats] = useState<QAStats>({ total: 0, answered: 0, unanswered: 0 });
@@ -38,7 +40,7 @@ export default function QA() {
 
   const showToast = (msg: string) => {
     setToast(msg);
-    setTimeout(() => setToast(null), 3000);
+    later(() => setToast(null), 3000);
   };
 
   const handleUpdate = async (id: number, answer: string) => {

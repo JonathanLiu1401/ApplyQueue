@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useSafeTimeout } from "../../hooks/useSafeTimeout";
 import { TestTube, CheckCircle, XCircle, Loader2, ChevronDown, ChevronUp, ExternalLink } from "lucide-react";
 import { getLLMSettings, saveLLMSettings, testLLMConnection, fetchOllamaModels } from "../../lib/api";
 import { trackEvent } from "../../lib/analytics";
@@ -71,6 +72,7 @@ interface LLMSettingsFormProps {
 }
 
 export default function LLMSettingsForm({ onSaved, compact }: LLMSettingsFormProps) {
+  const later = useSafeTimeout();
   const { t } = useTranslation("llm");
   const [settings, setSettings] = useState<LLMSettings>(defaultSettings);
   const [testStatus, setTestStatus] = useState<"idle" | "testing" | "success" | "error">("idle");
@@ -169,7 +171,7 @@ export default function LLMSettingsForm({ onSaved, compact }: LLMSettingsFormPro
       try {
         await saveLLMSettings(newSettings);
         setSaved(true);
-        setTimeout(() => setSaved(false), 2000);
+        later(() => setSaved(false), 2000);
         onSaved?.();
       } catch { /* silent */ }
       finally { setSaving(false); }
@@ -183,7 +185,7 @@ export default function LLMSettingsForm({ onSaved, compact }: LLMSettingsFormPro
     try {
       await saveLLMSettings(newSettings);
       setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      later(() => setSaved(false), 2000);
       trackEvent("llm_provider_configured", { provider: newSettings.provider });
       onSaved?.();
     } catch { /* silent */ }

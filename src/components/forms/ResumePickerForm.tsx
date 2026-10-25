@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useSafeTimeout } from "../../hooks/useSafeTimeout";
 import { FolderOpen, CheckCircle, Loader2, Upload } from "lucide-react";
 import { getSettings, saveSettings } from "../../lib/api";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -11,6 +12,7 @@ const isPdf = (name: string, type?: string) =>
   type === "application/pdf" || name.toLowerCase().endsWith(".pdf");
 
 export default function ResumePickerForm({ onSaved }: ResumePickerFormProps) {
+  const later = useSafeTimeout();
   const [resumePath, setResumePath] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -43,7 +45,7 @@ export default function ResumePickerForm({ onSaved }: ResumePickerFormProps) {
       await saveSettings({ ...current, resume_path: path });
       lastSaved.current = path;
       setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      later(() => setSaved(false), 2000);
       onSaved?.();
     } catch { /* silent */ }
     finally { setSaving(false); }

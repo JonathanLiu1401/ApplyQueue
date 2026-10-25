@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSafeTimeout } from "../hooks/useSafeTimeout";
 import { Save } from "lucide-react";
 import { getProfile, saveProfile, getCountries } from "../lib/api";
 import type { CandidateProfile, CountryConfig } from "../lib/types";
@@ -36,6 +37,7 @@ const defaultProfile: CandidateProfile = {
 };
 
 export default function Profile() {
+  const later = useSafeTimeout();
   const { t } = useTranslation("profile");
   const [profile, setProfile] = useState<CandidateProfile>(defaultProfile);
   const [countries, setCountries] = useState<Record<string, CountryConfig>>({});
@@ -117,7 +119,7 @@ export default function Profile() {
       setSaveError(null);
       await saveProfile(profile);
       setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      later(() => setSaved(false), 3000);
     } catch (e) {
       setSaveError(t("saveError"));
       console.error("Failed to save profile:", e);

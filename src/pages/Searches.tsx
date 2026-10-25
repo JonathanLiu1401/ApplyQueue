@@ -18,6 +18,11 @@ import {
   getOutreachDrafts,
   createOutreachDraft,
   deleteOutreachDraft,
+  setSearchSchedule,
+  pauseSearch,
+  resumeSearch,
+  getScheduleAgentPrompt,
+  type SearchSchedule,
   type SearchesOverview,
   type Tracker,
   type SavedSearch,
@@ -176,7 +181,143 @@ function SearchCard({ s, resumes, onChange, onMessage }: {
         </div>
       </div>
       <StatLine s={s.stats} />
+      <ScheduleRow s={s} onChange={onChange} onMessage={onMessage} />
     </div>
+  );
+}
+
+const localTz = () => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "local";
+  } catch {
+    return "local";
+  }
+};
+
+const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString() : "");
+
+function ScheduleRow({ s, onChange, onMessage }: { s: SavedSearch; onChange: () => void; onMessage: (m: string) => void }) {
+  const cur: SearchSchedule = s.schedule || { kind: "off" };
+  const st = s.schedule_state;
+  const [time, setTime] = useState(cur.time || "09:00");
+  const [cron, setCron] = useState(cur.cron || "0 9 * * 1-5");
+  const save = async (next: SearchSchedule) => {
+    try {
+      await setSearchSchedule(s.id, next.kind === "off" ? { kind: "off" } : { ...next, tz: localTz() });
+      onChange();
+    } catch (e) {
+      onMessage(errText(e));
+    }
+  };
+  const toggle = async () => {
+    try {
+      await (st?.paused ? resumeSearch(s.id) : pauseSearch(s.id));
+      onChange();
+    } catch (e) {
+      onMessage(errText(e));
+    }
+  };
+  return (
+    <div className="space-y-1" data-testid={`schedule-${s.id}`}>
+      <div className="flex flex-wrap gap-2 items-center text-[13px]">
+        <span className="text-muted-foreground">Schedule</span>
+        <select
+          className={input + " w-auto"}
+          aria-label={`Schedule for ${s.name}`}
+          value={cur.kind}
+          onChange={(e) => {
+            const kind = e.target.value as SearchSchedule["kind"];
+            save(kind === "daily" ? { kind, time } : kind === "custom" ? { kind, cron } : kind === "hourly" ? { kind, minute: 0 } : { kind });
+          }}
+        >
+          <option value="off">Off (manual)</option>
+          <option value="hourly">Hourly</option>
+          <option value="daily">Daily</option>
+          <option value="custom">Custom (cron)</option>
+        </select>
+        {cur.kind === "daily" && (
+          <input
+            type="time"
+            className={input + " w-auto"}
+            aria-label={`Daily time for ${s.name}`}
+            value={time}
+            onChange={(e) => setTime(e.target.value)}
+            onBlur={() => time !== cur.time && save({ kind: "daily", time })}
+          />
+        )}
+        {cur.kind === "custom" && (
+          <>
+            <input
+              className={input + " w-40 font-mono"}
+              aria-label={`Cron for ${s.name}`}
+              value={cron}
+              onChange={(e) => setCron(e.target.value)}
+              placeholder="min hour dom mon dow"
+            />
+            <button className={btn} onClick={() => save({ kind: "custom", cron })}>Save</button>
+          </>
+        )}
+        {cur.kind !== "off" && (
+          <>
+            <button className={btn} onClick={toggle}>{st?.paused ? "Resume" : "Pause"}</button>
+            <span className="text-muted-foreground">
+              {st?.running ? "Running now" : st?.paused ? "Paused" : st?.next_run_at ? `Next: ${when(st.next_run_at)}` : ""}
+              {st?.backoff_until && !st.paused ? ` · rate limited, waiting until ${when(st.backoff_until)}` : ""}
+            </span>
+          </>
+        )}
+      </div>
+      {st?.notice && (
+        <div role="alert" className="text-[13px] p-2 rounded border border-amber-500/50 bg-amber-500/10 flex flex-wrap gap-2 items-center">
+          <span className="flex-1">{st.notice.message}</span>
+          <a className={primary} href={`#${st.notice.action}`}>
+            {st.notice.kind === "reauth" ? "Sign in again" : "Open log"}
+          </a>
+          <button className={btn} onClick={toggle}>Resume</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+type AgentTarget = "grok" | "chatgpt" | "claude" | "codex" | "cursor";
+
+function AlwaysOnPanel({ onMessage }: { onMessage: (m: string) => void }) {
+  const [target, setTarget] = useState<AgentTarget>("grok");
+  const [prompt, setPrompt] = useState("");
+  const load = async () => {
+    try {
+      setPrompt((await getScheduleAgentPrompt(target)).prompt);
+    } catch (e) {
+      onMessage(errText(e));
+    }
+  };
+  return (
+    <Section title="Run schedules when the app is closed">
+      <div className="space-y-2 text-[13px]" data-testid="always-on">
+        <p className="text-muted-foreground">
+          While ApplyQueue is open it runs due searches itself. To keep them running when it is closed, give this prompt to an
+          always-on agent. It lists your search terms and schedules only, no keys or passwords. Only one device or agent runs a
+          search at a time (sync lock).
+        </p>
+        <div className="flex gap-2">
+          <select className={input + " w-auto"} aria-label="Agent" value={target} onChange={(e) => setTarget(e.target.value as AgentTarget)}>
+            <option value="grok">Grok Bot</option>
+            <option value="chatgpt">ChatGPT scheduled task</option>
+            <option value="claude">Claude scheduled task</option>
+            <option value="codex">Codex (OS scheduler)</option>
+            <option value="cursor">Cursor (OS scheduler)</option>
+          </select>
+          <button className={btn} onClick={load}>Show prompt</button>
+          {prompt && (
+            <button className={btn} onClick={() => navigator.clipboard?.writeText(prompt).then(() => onMessage("Copied"))}>
+              Copy
+            </button>
+          )}
+        </div>
+        {prompt && <pre className="whitespace-pre-wrap p-2 rounded border border-border max-h-64 overflow-auto">{prompt}</pre>}
+      </div>
+    </Section>
   );
 }
 
@@ -507,6 +648,7 @@ export default function Searches() {
               ))}
             </div>
           </Section>
+          {data.searches.some((s) => s.schedule && s.schedule.kind !== "off") && <AlwaysOnPanel onMessage={setMessage} />}
           {tracker && <TrackerPanel tracker={tracker} searches={data.searches} onChange={refresh} />}
           <ResumesPanel data={data} onChange={refresh} />
           <RulesPanel key={rulesKey} rules={data.rules} resumes={data.resumes} onChange={refresh} />

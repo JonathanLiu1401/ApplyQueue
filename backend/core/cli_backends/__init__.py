@@ -3,7 +3,7 @@
 Gemini is API-key only; Grok Bot is supported through a generated setup prompt.
 """
 from .adapters import CLAUDE_TERMS, SPECS, detect
-from .prompt import build_task_prompt, grok_bot_setup_prompt
+from .prompt import build_task_prompt, grok_bot_setup_prompt, schedule_runner_prompt
 
 ORDER = ("grok", "cursor", "codex", "claude", "gemini")
 
@@ -20,4 +20,4 @@ def list_backends(settings: dict, check_auth: bool = True) -> list[dict]:
 
 
 __all__ = ["SPECS", "ORDER", "CLAUDE_TERMS", "detect", "list_backends", "build_task_prompt",
-           "grok_bot_setup_prompt"]
+           "grok_bot_setup_prompt", "schedule_runner_prompt"]

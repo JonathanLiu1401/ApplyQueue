@@ -73,7 +73,7 @@ def build_task_prompt() -> str:
     return TASK_PROMPT.format(policy=mcp_policy_text())
 
 
-def grok_bot_setup_prompt(backends: list[dict] | None = None) -> str:
+def grok_bot_setup_prompt(backends: list[dict] | None = None, schedules: dict | None = None) -> str:
     """Text the user pastes into Grok Bot to set up ApplyQueue with a subscription CLI.
 
     Built only from static text and public CLI facts: no API keys, tokens, passwords, emails,
@@ -106,4 +106,84 @@ def grok_bot_setup_prompt(backends: list[dict] | None = None) -> str:
         "4. Running one test application from the queue and reading the result together.",
         "Do not ask me to paste any key, token or password into this chat.",
     ]
+    rows = [r for r in (schedules or {}).get("searches", []) if not r.get("paused")]
+    if rows:
+        lines += ["", "Scheduled searches (also in my private sync repo at schedules/searches.json):"]
+        lines += [f"- {r['id']} \"{r['name']}\": cron `{r['cron']}` ({r.get('tz') or 'local'} time), mode {r['mode']}"
+                  for r in rows]
+        lines += ["", *_RUNNER_RULES]
+    return "\n".join(lines) + "\n"
+
+
+_RUNNER_RULES = [
+    "Rules for running a scheduled search (always-on runner):",
+    "- One runner per search: before a run, pull the sync repo and create locks/search-<id>.json with",
+    "  {\"name\": \"search-<id>\", \"worker\": <your name>, \"device\": <your id>, \"claimed_at\": <UTC ISO>,",
+    "  \"ttl_sec\": 10800}, commit and push. If the file already exists, belongs to someone else and",
+    "  claimed_at + ttl_sec is in the future, or your push loses the race, skip this run.",
+    "- Catch-up: if you missed one or more slots (sleep, downtime), run ONCE now, then wait for the",
+    "  next slot after now. Never replay missed slots. Keep runs at least 15 minutes apart.",
+    "- Before running, read schedules/runs.jsonl; if another device already started this search after",
+    "  the slot you are about to run, skip it.",
+    "- Rate limits (HTTP 429, \"too many requests\", quota): stop this run and back off 15 minutes,",
+    "  doubling each time up to 24 hours; a clean run resets the backoff.",
+    "- Expired login (job site or AI sign-in): stop, pause this search, and tell me which sign-in to",
+    "  renew. Never ask me for the password or token in chat; I sign in myself, then say \"resume\".",
+    "- Results: append each new posting as one JSON line to queue/postings/<yyyy-mm>.jsonl with",
+    "  job_key (sha1 of the canonical URL is fine), url, title, company, location, source, search_id,",
+    "  added_at and device; ApplyQueue imports them (review-first unless the search mode is auto).",
+    "- After the run: append {search_id, device, started_at, finished_at, outcome} to",
+    "  schedules/runs.jsonl (outcome: ok, rate_limit, auth, error), delete your lock file, commit, push.",
+    "- Never write keys, tokens, passwords, cookies or emails into the repo or this chat.",
+]
+
+_TARGETS = {
+    "grok": "Grok Bot (always-on agent)",
+    "chatgpt": "a ChatGPT scheduled task",
+    "claude": "a Claude scheduled task in the cloud",
+    "codex": "Codex on my computer",
+    "cursor": "Cursor on my computer",
+}
+
+
+def schedule_runner_prompt(export: dict, target: str = "grok") -> str:
+    """Prompt that makes an always-on agent run my saved-search schedules.
+
+    Contains my own search terms and schedules from ApplyQueue; never keys, tokens, emails,
+    profile data or local paths.
+    """
+    if target not in _TARGETS:
+        raise ValueError("target must be one of: " + ", ".join(_TARGETS))
+    rows = export.get("searches", [])
+    lines = [f"Please run my ApplyQueue saved-search schedules as {_TARGETS[target]}.", ""]
+    if not rows:
+        lines.append("No searches have a schedule yet. Set one in ApplyQueue → Searches first.")
+        return "\n".join(lines) + "\n"
+    lines.append("Schedules (cron fields: minute hour day-of-month month day-of-week):")
+    for r in rows:
+        state = " [PAUSED, do not run]" if r.get("paused") else ""
+        locs = ", ".join(r.get("locations") or []) or "any location"
+        lines.append(f"- {r['id']} \"{r['name']}\"{state}: `{r['cron']}` in {r.get('tz') or 'local'} time; "
+                     f"titles: {', '.join(r.get('titles') or [])}; locations: {locs}; mode: {r['mode']}"
+                     + (f"; at most {r['max_jobs']} jobs" if r.get("max_jobs") else ""))
+    lines.append("")
+    if target in ("codex", "cursor"):
+        lines += [
+            "On this computer, do not reimplement the collector. Register an OS scheduler entry that runs the",
+            "ApplyQueue backend headless every 15 minutes: `<ApplyQueue backend> --run-schedules-once`",
+            "(macOS: a launchd LaunchAgent with StartInterval 900; Linux: a crontab line `*/15 * * * *`;",
+            "Windows: Task Scheduler, repeat every 15 minutes). It runs only searches that are due, one",
+            "at a time, holds the cross-device lock, catches up once after sleep, backs off on rate limits",
+            "and pauses with a re-auth notice when a login expired. Show me the entry before adding it, and",
+            "find the backend binary inside the installed ApplyQueue app (or `python backend/main.py` in a",
+            "source checkout) instead of guessing a path.",
+        ]
+    else:
+        lines += [
+            "Create one recurring task per search at the times above (or one task every 15 minutes that",
+            "checks which searches are due). Each run searches public job boards for the titles and",
+            "locations and records new postings in my private ApplyQueue sync repo. If you cannot reach",
+            "the sync repo, send me the new postings as a list instead and do not try to apply.",
+        ]
+    lines += ["", *_RUNNER_RULES]
     return "\n".join(lines) + "\n"

@@ -993,6 +993,50 @@ class TestSearchesApi:
         assert listing["searches"][0]["stats"]["found"] == 0
         assert listing["outreach"]["enabled"] is False and listing["starter_packs"]
 
+    def test_schedule_endpoints(self, auth_client, data_dir, monkeypatch):
+        s = auth_client.post("/searches", json={"titles": ["Analyst"]}).json()["search"]
+        assert s["schedule"] == {"kind": "off"}
+        assert auth_client.put(f"/searches/{s['id']}/schedule", json={"kind": "custom", "cron": "* * * * *"}).status_code == 400
+        assert auth_client.put("/searches/s_nope/schedule", json={"kind": "hourly"}).status_code == 404
+        r = auth_client.put(f"/searches/{s['id']}/schedule", json={"kind": "daily", "time": "08:30", "tz": "UTC"})
+        assert r.status_code == 200, r.text
+        view = r.json()["schedule"]
+        assert view["cron"] == "30 8 * * *" and view["next_run_at"] and not view["paused"]
+        assert auth_client.post(f"/searches/{s['id']}/pause").json()["schedule"]["paused"] is True
+        listing = auth_client.get("/schedules").json()
+        assert listing["schedules"][0]["paused"] and listing["min_gap_minutes"] == 15
+        assert auth_client.get("/searches").json()["searches"][0]["schedule_state"]["paused"] is True
+        assert auth_client.post(f"/searches/{s['id']}/resume").json()["schedule"]["paused"] is False
+        assert auth_client.post("/searches/s_nope/pause").status_code == 404
+        # setup prompt + agent prompt carry the schedule, never secrets
+        setup = auth_client.get("/agents/setup-prompt").json()["prompt"]
+        assert s["id"] in setup and "30 8 * * *" in setup
+        p = auth_client.get("/schedules/agent-prompt", params={"target": "codex"}).json()["prompt"]
+        assert "--run-schedules-once" in p and "Analyst" in p
+        assert auth_client.get("/schedules/agent-prompt", params={"target": "x"}).status_code == 400
+        # tick: due search starts through the collector with the search id
+        from core.searches import schedule
+        schedule._mutate(s["id"], lambda st: st.update(next_run_at=1.0))
+        monkeypatch.setattr(schedule, "next_after", lambda *a, **k: 4102444800.0)
+        seen = {}
+
+        async def fake_start(req, on_done=None):
+            seen["id"] = req.search_id
+            on_done([], ["Collection complete!"], False)
+            return {"success": True}
+        monkeypatch.setattr(main, "_start_collection", fake_start)
+        res = auth_client.post("/schedules/tick").json()["results"]
+        assert res == [{"id": s["id"], "action": "started"}] and seen["id"] == s["id"]
+        assert schedule.load_state()[s["id"]]["last_outcome"] == "ok"
+
+    def test_headless_runner_runs_due_searches_one_by_one(self, monkeypatch, capsys):
+        seq = [[{"id": "s_a", "action": "started"}, ], [{"id": "s_b", "action": "started"}],
+               [{"id": "s_c", "action": "skipped_other_device", "holder": "Laptop"}]]
+        monkeypatch.setattr(main, "_schedule_tick", lambda: seq.pop(0))
+        monkeypatch.setattr(main, "_collection_thread", None)
+        assert main.run_schedules_once() == 2
+        assert "skipped_other_device" in capsys.readouterr().out
+
     def test_validation_is_400(self, auth_client):
         assert auth_client.post("/searches", json={"titles": []}).status_code == 400
         assert auth_client.post("/resumes", json={"path": "/nope/cv.pdf"}).status_code == 400

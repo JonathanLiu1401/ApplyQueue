@@ -22,6 +22,10 @@ vi.mock("../lib/api", () => ({
   getOutreachDrafts: vi.fn(async () => []),
   createOutreachDraft: vi.fn(async () => ({ success: true })),
   deleteOutreachDraft: vi.fn(async () => ({ success: true })),
+  setSearchSchedule: vi.fn(async () => ({ success: true })),
+  pauseSearch: vi.fn(async () => ({ success: true })),
+  resumeSearch: vi.fn(async () => ({ success: true })),
+  getScheduleAgentPrompt: vi.fn(async () => ({ prompt: "Please run my ApplyQueue saved-search schedules" })),
 }));
 
 const zero = { found: 0, review: 0, applied: 0, skipped: 0, confirmed: 0, interviews: 0, rejections: 0, responses: 0, response_rate: 0, interview_rate: 0 };
@@ -118,5 +122,56 @@ describe("Searches page", () => {
     expect(api.getOutreachDrafts).not.toHaveBeenCalled();
     await userEvent.click(box);
     expect(api.saveOutreach).toHaveBeenCalledWith({ enabled: true });
+  });
+
+  it("sets a daily schedule in local time and shows the next run", async () => {
+    render(<Searches />);
+    const sel = await screen.findByLabelText("Schedule for Data roles");
+    await userEvent.selectOptions(sel, "daily");
+    await waitFor(() =>
+      expect(api.setSearchSchedule).toHaveBeenCalledWith("s1", expect.objectContaining({ kind: "daily", time: "09:00" })),
+    );
+    const arg = vi.mocked(api.setSearchSchedule).mock.calls[0][1];
+    expect(arg.tz).toBeTruthy();
+  });
+
+  it("shows the re-auth notice with a sign-in link and resumes", async () => {
+    vi.mocked(api.getSearches).mockResolvedValue(overview({
+      searches: [{
+        ...search,
+        schedule: { kind: "hourly", minute: 0, tz: "UTC" },
+        schedule_state: {
+          next_run_at: null, last_run_at: null, last_outcome: "auth", running: false, paused: true,
+          paused_reason: "login_expired", backoff_until: null, failures: 0,
+          notice: { kind: "reauth", target: "ai", message: "Your AI sign-in or API key stopped working.", action: "/llm" },
+        },
+      }],
+    }));
+    render(<Searches />);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("AI sign-in");
+    expect(screen.getByText("Sign in again").getAttribute("href")).toBe("#/llm");
+    await userEvent.click(screen.getAllByText("Resume")[0]);
+    expect(api.resumeSearch).toHaveBeenCalledWith("s1");
+    await userEvent.click(screen.getByText("Show prompt"));
+    expect(await screen.findByText(/saved-search schedules/)).toBeInTheDocument();
+    expect(api.getScheduleAgentPrompt).toHaveBeenCalledWith("grok");
+  });
+
+  it("pauses an active schedule and saves a custom cron", async () => {
+    vi.mocked(api.getSearches).mockResolvedValue(overview({
+      searches: [{ ...search, schedule: { kind: "custom", cron: "0 9 * * 1-5", tz: "UTC" },
+        schedule_state: { next_run_at: "2026-03-02T09:00:00+00:00", last_run_at: null, last_outcome: null, running: false,
+          paused: false, paused_reason: null, notice: null, backoff_until: null, failures: 0 } }],
+    }));
+    render(<Searches />);
+    expect(await screen.findByText(/Next:/)).toBeInTheDocument();
+    await userEvent.click(screen.getByText("Pause"));
+    expect(api.pauseSearch).toHaveBeenCalledWith("s1");
+    const cron = screen.getByLabelText("Cron for Data roles");
+    await userEvent.clear(cron);
+    await userEvent.type(cron, "30 7 * * *");
+    await userEvent.click(screen.getByText("Save"));
+    expect(api.setSearchSchedule).toHaveBeenCalledWith("s1", expect.objectContaining({ kind: "custom", cron: "30 7 * * *" }));
   });
 });

@@ -388,3 +388,61 @@ def test_sanitize_storage_state_drops_mail_and_ai():
     s = sanitize_storage_state({"cookies": [{"domain": "mail.google.com"}, {"domain": "x.ai"},
                                             {"domain": "myworkdayjobs.com"}], "origins": []})
     assert s["cookies"] == [{"domain": "myworkdayjobs.com"}]
+
+
+# ── M7: scheduled searches over sync ──
+def test_named_search_lock_single_runner_and_survives_sync(world):
+    a = world.use("laptop")
+    a.sync_now()
+    assert a.try_named_lock("search-s_1", 600)["ok"]
+    assert json.loads(world.remote_file("locks/search-s_1.json"))["worker"] == "laptop"
+    assert a.sync_now()["released"] == 0                    # not a job lock: sync keeps it
+    assert world.remote_file("locks/search-s_1.json")
+    b = world.use("desktop")
+    res = b.try_named_lock("search-s_1", 600)
+    assert res["ok"] is False and res["holder"] == "laptop"
+    assert b.release_named("search-s_1") is False            # cannot release someone else's
+    assert world.use("laptop").release_named("search-s_1") is True
+    assert world.remote_file("locks/search-s_1.json") is None
+    assert world.use("desktop").try_named_lock("search-s_1", 600)["ok"]
+    with pytest.raises(ValueError):
+        b.try_named_lock("../x", 1)
+
+
+def test_schedules_exported_and_remote_runs_and_agent_postings(world):
+    from core.searches import schedule, store as search_store
+    a = world.use("laptop")
+    s = search_store.upsert_search({"titles": ["Robotics Engineer"], "mode": "review",
+                                    "schedule": {"kind": "daily", "time": "09:00", "tz": "UTC"}})
+    out = a.sync_now()
+    assert out["schedules"]["scheduled"] == 1
+    exp = json.loads(world.remote_file("schedules/searches.json"))
+    assert exp["searches"][0]["id"] == s["id"] and exp["searches"][0]["cron"] == "0 9 * * *"
+    # an always-on agent ran the search and pushed a posting + a run row
+    bot = world.tmp / "bot"
+    git("clone", "-q", str(world.remote), str(bot), cwd=world.tmp)
+    (bot / "queue" / "postings").mkdir(parents=True, exist_ok=True)
+    with open(bot / "queue" / "postings" / "2026-03.jsonl", "a") as f:
+        f.write(json.dumps({"job_key": job_key(JOB_B), "url": JOB_B, "title": "Robotics Engineer",
+                            "company": "Acme Widgets", "search_id": s["id"], "device": "bot"}) + "\n")
+    (bot / "schedules").mkdir(exist_ok=True)
+    started = "2099-01-01T09:00:00+00:00"
+    with open(bot / "schedules" / "runs.jsonl", "a") as f:
+        f.write(json.dumps({"search_id": s["id"], "device": "bot", "started_at": started, "outcome": "ok"}) + "\n")
+    git("add", "-A", cwd=bot)
+    git("commit", "-q", "-m", "bot run", cwd=bot)
+    git("push", "-q", "origin", "HEAD:main", cwd=bot)
+    out = world.use("laptop").sync_now()
+    assert out["schedules"]["imported_runs"] == 1
+    st = schedule.load_state()[s["id"]]
+    assert st["last_remote_run"].startswith("2099-01-01T09:00")
+    job = jobs_store.get_job(JOB_B)
+    assert job["search_id"] == s["id"] and job["review"] == "pending"   # review-first search
+    # our own runs go to runs.jsonl once
+    schedule.begin(s["id"], a.device)
+    schedule.finish(s["id"], "ok", device=a.device)
+    assert world.use("laptop").sync_now()["schedules"]["exported_runs"] == 1
+    assert world.use("laptop").sync_now()["schedules"]["exported_runs"] == 0
+    rows = [json.loads(x) for x in world.remote_file("schedules/runs.jsonl").splitlines()]
+    assert {r["device"] for r in rows} == {"bot", a.device}
+    assert "token" not in world.remote_file("schedules/searches.json").lower()

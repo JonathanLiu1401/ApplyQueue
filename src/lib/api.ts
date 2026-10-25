@@ -778,6 +778,35 @@ export interface SavedSearch {
   created_at?: string;
   last_run_at?: string | null;
   stats?: Partial<SearchStats>;
+  schedule?: SearchSchedule;
+  schedule_state?: ScheduleState;
+}
+
+export interface SearchSchedule {
+  kind: "off" | "hourly" | "daily" | "custom";
+  tz?: string;
+  minute?: number;
+  time?: string;
+  cron?: string;
+}
+
+export interface ScheduleNotice {
+  kind: "reauth" | "errors";
+  target?: "ai" | "portal";
+  message: string;
+  action: string;
+}
+
+export interface ScheduleState {
+  next_run_at: string | null;
+  last_run_at: string | null;
+  last_outcome: string | null;
+  running: boolean;
+  paused: boolean;
+  paused_reason: string | null;
+  notice: ScheduleNotice | null;
+  backoff_until: string | null;
+  failures: number;
 }
 
 export interface SearchCategory {
@@ -873,6 +902,27 @@ export async function deleteSearch(id: string) {
 
 export async function runSearch(id: string) {
   return request<{ success: boolean; message?: string }>(`/searches/${encodeURIComponent(id)}/run`, { method: "POST" });
+}
+
+type ScheduleView = ScheduleState & { id: string; name: string; schedule: SearchSchedule; cron: string | null };
+
+export async function setSearchSchedule(id: string, schedule: SearchSchedule) {
+  return request<{ success: boolean; schedule: ScheduleView }>(
+    `/searches/${encodeURIComponent(id)}/schedule`,
+    jsonPost(schedule, "PUT"),
+  );
+}
+
+export async function pauseSearch(id: string) {
+  return request<{ success: boolean; schedule: ScheduleView }>(`/searches/${encodeURIComponent(id)}/pause`, { method: "POST" });
+}
+
+export async function resumeSearch(id: string) {
+  return request<{ success: boolean; schedule: ScheduleView }>(`/searches/${encodeURIComponent(id)}/resume`, { method: "POST" });
+}
+
+export async function getScheduleAgentPrompt(target: "grok" | "chatgpt" | "claude" | "codex" | "cursor") {
+  return request<{ prompt: string }>(`/schedules/agent-prompt?target=${encodeURIComponent(target)}`);
 }
 
 export async function quickStartSearch(body: { resume_path?: string; titles: string[]; locations: string[]; start: boolean }) {

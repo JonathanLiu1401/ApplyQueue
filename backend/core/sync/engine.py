@@ -9,6 +9,9 @@ Layout (docs/applyqueue/DESIGN.md §6)::
     credentials/portals.json[.enc]       portal logins, last-writer-wins per id by updatedAt
     sessions/<profile>/storage.json[.enc] portal sessions (AI/mail origins stripped)
     workers/<device>.json                heartbeat
+    locks/search-<id>.json               single-runner lock for one scheduled search run
+    schedules/searches.json              scheduled searches for always-on agents (no secrets)
+    schedules/runs.jsonl                 scheduled runs by any device or agent, union-merged
 
 Every write goes through ``token_guard`` (no AI/email OAuth tokens ever). For a GitHub repo
 the visibility is checked via ``GET /repos/{owner}/{repo}`` before every credential/session
@@ -66,7 +69,7 @@ PRIORITY = {"confirmed": 6, "submitted": 5, "needs_human": 4, "blocked": 4, "fai
             "claimed": 1, "released": 1, "queued": 0}
 _STATUS_RANK = {js.PENDING: 0, js.FAILED: 0, js.IN_PROGRESS: 1, js.NEEDS_HUMAN: 4, js.BLOCKED: 4,
                 js.SUBMITTED_UNCONFIRMED: 5, js.LEGACY_APPLIED: 5, js.CONFIRMED: 6}
-POSTING_FIELDS = ("title", "company", "location", "source", "category")
+POSTING_FIELDS = ("title", "company", "location", "source", "category", "search_id")
 # Never copied into the sync repo as part of a portal session.
 SESSION_DENY_DOMAINS = (
     "google.com", "googleapis.com", "gmail.com", "microsoftonline.com", "live.com", "outlook.com",
@@ -74,6 +77,17 @@ SESSION_DENY_DOMAINS = (
     "x.ai", "grok.com", "x.com", "cursor.com", "cursor.sh", "github.com", "githubusercontent.com",
 )
 _TRACKING = re.compile(r"^(utm_|gh_src$|source$|ref$|src$|lever-origin$|trk)")
+
+
+def _auto_search_ids() -> set[str]:
+    try:
+        try:
+            from core.searches import store as search_store
+        except ImportError:  # pragma: no cover
+            from backend.core.searches import store as search_store
+        return {x["id"] for x in search_store.list_searches() if x.get("mode") == "auto"}
+    except Exception:
+        return set()
 
 
 def _now() -> str:
@@ -358,6 +372,81 @@ class SyncEngine:
             self._remember_lock(key)
             return {"ok": True, "stale_recovered": stale, **({"offline": True} if res.get("offline") else {})}
 
+    def try_named_lock(self, name: str, ttl_s: int, meta: dict | None = None) -> dict:
+        """Create-only lock ``locks/<name>.json`` that is NOT tied to a queued job.
+
+        Used for one-runner-per-search scheduling. Kept out of ``held_locks`` so the job-lock
+        cleanup in ``sync_now`` never drops it; callers release it with :meth:`release_named`.
+        """
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", name or ""):
+            raise ValueError("bad lock name")
+        with self._lock:
+            repo = self.ensure_repo()
+            offline = False
+            try:
+                self._pull(repo)
+            except NetworkError:
+                offline = True
+            cur = self.read_lock(name)
+            if cur and cur.get("device") != self.device and not self._lock_expired(json.dumps(cur)):
+                return {"ok": False, "reason": "locked", "holder": cur.get("worker"), "until": cur.get("claimed_at")}
+            stale = bool(cur and cur.get("device") != self.device)
+            lock = {"name": name, "worker": self.label, "device": self.device, "claimed_at": _now(),
+                    "ttl_sec": int(ttl_s), **(meta or {})}
+            self._write(self._lock_path(name), json.dumps(lock, indent=2) + "\n")
+            repo.commit_all(f"lock {name}" + (" (stale lock recovered)" if stale else ""))
+            if offline:
+                self._update_state(offline=True, pending=repo.ahead())
+                return {"ok": True, "offline": True, "stale_recovered": stale}
+            res = self._push(repo)
+            if (self.read_lock(name) or {}).get("device") != self.device:
+                return {"ok": False, "reason": "lost_race", "holder": (self.read_lock(name) or {}).get("worker")}
+            return {"ok": True, "stale_recovered": stale, **({"offline": True} if res.get("offline") else {})}
+
+    def release_named(self, name: str, push: bool = True) -> bool:
+        with self._lock:
+            repo = self.ensure_repo()
+            cur = self.read_lock(name)
+            if not cur or cur.get("device") != self.device:
+                return False
+            token_guard.safe_sync_delete(store.repo_dir(), self._lock_path(name))
+            repo.commit_all(f"release {name}")
+            if push:
+                try:
+                    self._push(repo)
+                except (github.NotPrivate, github.Offline, NetworkError):
+                    pass
+            return True
+
+    def _sync_schedules(self) -> dict:
+        """Import runs other devices/agents recorded; export ours and the schedule list."""
+        try:
+            from core.searches import schedule
+        except ImportError:  # pragma: no cover
+            from backend.core.searches import schedule
+        runs_path = store.repo_dir() / "schedules" / "runs.jsonl"
+        rows = []
+        if runs_path.exists():
+            for ln in runs_path.read_text(encoding="utf-8").splitlines():
+                try:
+                    rows.append(json.loads(ln))
+                except ValueError:
+                    continue
+        imported = schedule.record_remote_runs(rows, self.device)
+        st = self._state()
+        done = set(st.get("exported_runs", []))
+        new = schedule.runs_to_export(self.device, done)
+        for r in new:
+            key = r.pop("_key")
+            self._append("schedules/runs.jsonl", r)
+            done.add(key)
+        st["exported_runs"] = sorted(done)[-2000:]
+        self._save_state(st)
+        export = schedule.export_for_sync(self.device)
+        if export["searches"]:
+            self._write("schedules/searches.json", json.dumps(export, indent=2, sort_keys=True) + "\n")
+        return {"imported_runs": imported, "exported_runs": len(new), "scheduled": len(export["searches"])}
+
     def _remember_lock(self, key: str) -> None:
         st = self._state()
         st.setdefault("held_locks", {})[key] = _now()
@@ -527,12 +616,17 @@ class SyncEngine:
         local = jobs_store.read_jobs()
         local_keys = {job_key(u): u for u in local}
         updates, added = {}, {}
+        auto_ids = _auto_search_ids()
         for key, post in postings.items():
             if key not in local_keys:
                 ev = (compacted.get(key) or {}).get("event")
                 added[post["url"]] = {**{f: post[f] for f in POSTING_FIELDS if post.get(f)}, "url": post["url"],
                                       "status": EVENT_TO_STATUS.get(ev, js.PENDING), "added_at": post.get("added_at"),
                                       "synced_from": post.get("device")}
+                # Postings an agent found for a saved search: review-first unless that search is "auto".
+                if post.get("search_id") and post["search_id"] not in auto_ids \
+                        and added[post["url"]]["status"] == js.PENDING:
+                    added[post["url"]]["review"] = "pending"
         for key, row in compacted.items():
             url = local_keys.get(key)
             target = EVENT_TO_STATUS.get(row["event"])
@@ -582,6 +676,10 @@ class SyncEngine:
             out["imported"] = self._import_jobs()
             out["exported"] = self._export_jobs()
             out["released"] = self._release_finished(repo)
+            try:
+                out["schedules"] = self._sync_schedules()
+            except Exception as e:  # schedules must never break job/credential sync
+                log.warning("schedule sync failed: %s", type(e).__name__)
             if self.credentials_allowed():
                 try:
                     out["credentials"] = self.sync_credentials()

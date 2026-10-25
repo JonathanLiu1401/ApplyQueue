@@ -110,6 +110,8 @@ def clean_search(body: dict, existing: dict | None = None) -> dict:
     if not isinstance(filters, dict):
         raise ValidationError("filters must be an object")
     bans = merged.get("bans") or {}
+    from .schedule import clean_schedule  # local import: schedule imports this module
+    schedule = clean_schedule(merged.get("schedule"))
     return {
         "id": cur.get("id") or _new_id("s"),
         "name": _text(merged.get("name") or titles[0], 80, True, "name"),
@@ -124,6 +126,7 @@ def clean_search(body: dict, existing: dict | None = None) -> dict:
         "bans": {"companies": _list(bans.get("companies")), "keywords": _list(bans.get("keywords"))},
         "created_at": cur.get("created_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "last_run_at": cur.get("last_run_at"),
+        "schedule": schedule,
     }
 
 

@@ -68,6 +68,7 @@ async def lifespan(app: FastAPI):
     _start_parent_watchdog()
     _start_mail_sweeper()
     _start_sync_loop()
+    _start_search_scheduler()
     yield
     _mail_stop.set()
     # Graceful shutdown: stop running operations
@@ -677,13 +678,16 @@ def _search_err(e: Exception):
 
 @app.get("/searches")
 async def list_saved_searches():
-    from core.searches import store as search_store, stats as search_stats, packs
+    from core.searches import store as search_store, stats as search_stats, packs, schedule
     from core.shared_config import read_jobs
     cfg = search_store.load()
     tr = search_stats.tracker(read_jobs(), cfg)
     by_id = {s["id"]: s for s in tr["searches"]}
+    sched = schedule.load_state()
     return {
-        "searches": [{**s, "stats": by_id.get(s["id"], {})} for s in cfg["searches"]],
+        "searches": [{**s, "stats": by_id.get(s["id"], {}),
+                      "schedule_state": schedule.public_state(s["id"], sched.get(s["id"], {}))}
+                     for s in cfg["searches"]],
         "rules": cfg["rules"],
         "resumes": cfg["resumes"],
         "outreach": cfg["outreach"],
@@ -1099,6 +1103,11 @@ _collection_thread: threading.Thread | None = None
 @app.post("/jobs/collect")
 async def start_collection(body: CollectRequest):
     """Start job collection in-process (no subprocess, no external Python needed)."""
+    return await _start_collection(body)
+
+
+async def _start_collection(body: CollectRequest, on_done=None):
+    """``on_done(errors, log_lines, cancelled)`` is called once when a started run ends (schedules)."""
     global _collection_thread, _collection_status
 
     if _collection_status["running"]:
@@ -1124,7 +1133,23 @@ async def start_collection(body: CollectRequest):
         search_store.touch_search(search["id"])
     _collection_status = {"running": True, "title": (search or {}).get("name") or title or "all titles", "log": ["Starting collection... This may take several minutes per job title."], "collected": 0, "max_jobs": max_jobs}
 
+    run_errors: list[str] = []
+
     async def _do_collect():
+        try:
+            await _do_collect_inner()
+        except Exception as e:
+            run_errors.append(str(e) or type(e).__name__)
+            raise
+        finally:
+            if on_done:
+                try:
+                    on_done(run_errors, list(_collection_status.get("log", []))[-200:],
+                            bool(_collection_status.get("cancel_requested")))
+                except Exception as e:  # never break the collector
+                    _log.warning(f"Schedule bookkeeping failed: {type(e).__name__}")
+
+    async def _do_collect_inner():
         """Run collection logic directly, bypassing argparse."""
         from core.shared_config import LOGS_DIR, read_jobs, refresh_credentials, credential_refresh_loop
         from cli import collect_jobs
@@ -1162,6 +1187,7 @@ async def start_collection(body: CollectRequest):
                 # parsing "total this title: N" and "N jobs collected" from agent output
                 print(f"  Found {len(found)} new jobs (total: {len(jobs)})")
             except Exception as e:
+                run_errors.append(str(e))
                 print(f"  Error: {e}")
 
         # Phase 2: Fetch descriptions for collected jobs
@@ -1189,6 +1215,7 @@ async def start_collection(body: CollectRequest):
                         else:
                             print(f"    ⚠️  No description extracted")
                     except Exception as e:
+                        run_errors.append(str(e))
                         print(f"    ❌ Error: {e}")
 
         cred_task.cancel()
@@ -1485,8 +1512,10 @@ async def agent_setup_prompt():
     """Grok Bot setup prompt: static text only, no keys, tokens, emails or paths."""
     from core.cli_backends import grok_bot_setup_prompt, list_backends
 
+    from core.searches import schedule
+
     rows = await asyncio.to_thread(list_backends, load_settings(), False)
-    return {"prompt": grok_bot_setup_prompt(rows)}
+    return {"prompt": grok_bot_setup_prompt(rows, schedule.export_for_sync(_schedule_device()))}
 
 
 # ── Linked mailboxes (M4) ─────────────────────────────────────────────────
@@ -1654,6 +1683,128 @@ def _start_sync_loop():
                 _log.warning(f"Sync failed: {type(e).__name__}")
 
     threading.Thread(target=_loop, name="sync-loop", daemon=True).start()
+
+
+# ── Scheduled searches (M7) ───────────────────────────────────────────────
+def _schedule_device() -> str:
+    try:
+        from core.sync import store as sync_store
+        return sync_store.device_id()
+    except Exception:
+        return "local"
+
+
+def _collector_busy() -> bool:
+    return bool(_collection_status.get("running"))
+
+
+def _start_scheduled_run(sid: str, on_done) -> bool:
+    res = asyncio.run(_start_collection(CollectRequest(search_id=sid), on_done=on_done))
+    return bool(res.get("success"))
+
+
+def _schedule_tick() -> list[dict]:
+    from core.searches import runner
+    return runner.tick(_start_scheduled_run, _collector_busy, device=_schedule_device())
+
+
+def _start_search_scheduler():
+    """In-app scheduler: every minute, start the first due saved search (one at a time)."""
+    if os.environ.get("APPLYQUEUE_DISABLE_SCHEDULER") or "pytest" in sys.modules:
+        return
+
+    def _loop():
+        while not _mail_stop.wait(60):
+            try:
+                for r in _schedule_tick():
+                    _log.info(f"Schedule: {r['action']} {r['id']}")
+            except Exception as e:  # never kill the sidecar
+                _log.warning(f"Schedule tick failed: {type(e).__name__}")
+
+    threading.Thread(target=_loop, name="search-scheduler", daemon=True).start()
+
+
+def run_schedules_once() -> int:
+    """Headless runner for an OS scheduler (cron, launchd, Task Scheduler) or an agent:
+    run every due saved search once, one after another, then exit."""
+    from core.searches import runner
+    ran = 0
+    for _ in range(50):
+        results = _schedule_tick()
+        started = [r for r in results if r["action"] == "started"]
+        for r in results:
+            print(json.dumps(r), flush=True)
+        if not started:
+            break
+        ran += 1
+        if _collection_thread is not None:
+            _collection_thread.join(timeout=runner.schedule.RUN_TTL_S)
+        runner.wait_idle(_collector_busy, timeout_s=60)
+    return ran
+
+
+def _schedule_view(s: dict, state: dict) -> dict:
+    from core.searches import schedule
+    return {"id": s["id"], "name": s["name"], "schedule": s.get("schedule") or {"kind": "off"},
+            "cron": schedule.cron_for(s.get("schedule")), **schedule.public_state(s["id"], state.get(s["id"], {}))}
+
+
+@app.get("/schedules")
+async def list_schedules():
+    from core.searches import schedule, store as search_store
+    await asyncio.to_thread(schedule.due)  # refresh next-run bookkeeping only; starts nothing
+    state = schedule.load_state()
+    return {"schedules": [_schedule_view(s, state) for s in search_store.list_searches()],
+            "min_gap_minutes": schedule.MIN_GAP_S // 60}
+
+
+@app.put("/searches/{sid}/schedule")
+async def set_search_schedule(sid: str, body: dict):
+    from core.searches import schedule, store as search_store
+    if not search_store.get_search(sid):
+        raise HTTPException(status_code=404, detail="Unknown search")
+    try:
+        s = search_store.upsert_search({"id": sid, "schedule": body})
+    except search_store.ValidationError as e:
+        return _search_err(e)
+    schedule.due()
+    return {"success": True, "schedule": _schedule_view(s, schedule.load_state())}
+
+
+@app.post("/searches/{sid}/pause")
+async def pause_search(sid: str):
+    from core.searches import schedule, store as search_store
+    if not search_store.get_search(sid):
+        raise HTTPException(status_code=404, detail="Unknown search")
+    schedule.pause(sid)
+    return {"success": True, "schedule": _schedule_view(search_store.get_search(sid), schedule.load_state())}
+
+
+@app.post("/searches/{sid}/resume")
+async def resume_search(sid: str):
+    from core.searches import schedule, store as search_store
+    if not search_store.get_search(sid):
+        raise HTTPException(status_code=404, detail="Unknown search")
+    schedule.resume(sid)
+    return {"success": True, "schedule": _schedule_view(search_store.get_search(sid), schedule.load_state())}
+
+
+@app.post("/schedules/tick")
+async def schedules_tick():
+    """Start the first due scheduled search now (same rules as the background scheduler)."""
+    return {"results": await asyncio.to_thread(_schedule_tick)}
+
+
+@app.get("/schedules/agent-prompt")
+async def schedules_agent_prompt(target: str = "grok"):
+    """Prompt for an always-on agent to run the schedules. Contains the user's own search
+    terms and schedules, never keys, tokens, emails or paths."""
+    from core.cli_backends import schedule_runner_prompt
+    from core.searches import schedule
+    try:
+        return {"prompt": schedule_runner_prompt(schedule.export_for_sync(_schedule_device()), target)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/sync/status")
@@ -2882,6 +3033,8 @@ async def reload_plugins():
 
 # ── Main ──────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--run-schedules-once":
+        sys.exit(0 if run_schedules_once() >= 0 else 1)
     if len(sys.argv) > 1 and sys.argv[1] == "--self-test":
         # Packaging smoke test (CI): imports above succeeded; check PDF I/O and arch.
         from core.pdf_io import self_test as _pdf_self_test

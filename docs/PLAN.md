@@ -363,7 +363,39 @@ M1 checklist (updated with each M1 commit):
 - [x] Rejection and interview emails are labelled `ApplyQueue/Rejected` and `ApplyQueue/Interview`
   (configurable), recorded on the matching job as `response`; interview mail is never archived,
   rejections only if you opt in.
-- [ ] Per-search schedules (cron-style reruns): not built; runs are manual for now.
+- [x] Per-search schedules (`core/searches/schedule.py`, `runner.py`): off / hourly / daily at a time /
+  custom 5-field cron, in the device's time zone, at most every 15 minutes, with pause and resume.
+  The spec is on the search; runtime state (next run, running, backoff, pause, notice, last 20 runs) is
+  in `schedule_state.json` under a file lock, so it survives restarts and the app and the headless
+  runner never overlap on one device.
+  - Runners: the in-app scheduler ticks every minute while the desktop app runs and starts at most one
+    due search at a time through the normal collector. `main.py --run-schedules-once` is the headless
+    runner for an OS scheduler (launchd, cron, Task Scheduler) and for Codex or Cursor on the computer.
+    Always-on agents (Grok Bot, ChatGPT and Claude scheduled tasks) read `schedules/searches.json` in
+    the private sync repo. They also get the schedules and the runner rules in the Grok Bot setup prompt
+    (`/agents/setup-prompt`) and the per-agent prompt (`/schedules/agent-prompt?target=`). Agents push
+    postings to `queue/postings/` with `search_id`; those are review-first unless the search is auto.
+  - Single runner across devices: `locks/search-<id>.json` (`SyncEngine.try_named_lock`, 3 h TTL, kept
+    apart from job locks). Runs are appended to `schedules/runs.jsonl`, so a slot
+    another device or agent already ran is not run again. If the lock is held elsewhere, the slot counts
+    as run there.
+  - Catch-up: after sleep or downtime, missed slots collapse into one run; the next run is computed from
+    "now". A "running" mark older than the TTL (crash, or the laptop slept mid-run) is dropped.
+  - Clock changes: a next run later than the cron's next slot from now is pulled in; backoff is clamped
+    to 24 h.
+  - Rate limits (429, quota, "too many requests"): back off 15 min, doubling up to 24 h; a clean run
+    resets it. Five other failures in a row pause the search.
+  - Expired logins (401, invalid key, "session expired", "please sign in"): the search is paused with a
+    notice and a one-click **Sign in again** link (AI sign-in → `/llm`, job site → Settings) plus
+    **Resume**. Resuming never replays missed slots.
+- M8 e2e cases for schedules:
+  - overlapping runs: same device (app plus headless runner) and two devices racing for one lock;
+  - laptop sleep mid-run: the lock TTL expires, then recovery, with no double apply;
+  - rate limits: 429 from a portal and from the AI provider, backoff growth, reset after a clean run;
+  - expired logins: AI key or CLI login, and a portal session, giving pause, notice, re-auth, resume;
+  - clock changes: manual clock back and forward, DST transitions, and a time-zone change while travelling.
+  - Known gaps to cover then: there is no lock heartbeat yet, so a run longer than 3 h can be taken over;
+    `schedules/searches.json` is last-writer-wins between devices.
 
 ## 6. Guardrails (unchanged)
 Private repo only; no GitHub fork; no upstream PRs, publishing, domains, or npm names without

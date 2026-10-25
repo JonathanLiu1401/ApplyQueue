@@ -1,0 +1,69 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Example Corp - Apply (multi-step)</title>
+<style>.err{color:#b00}</style></head>
+<body>
+<!-- Fictional employer and candidate (Alex Example). A two-step SPA-style form:
+     step 1 is re-rendered from state on Back (like React/Vue ATS forms);
+     ?reset=1 makes Back lose the start date; ?timeout=1 expires the session on Next;
+     the CV input rejects files over 1 MB in the browser. -->
+<h1>Apply: Data Engineer</h1>
+<div id="step"></div>
+<script>
+const q = new URLSearchParams(location.search);
+const state = {first: "", last: "", email: "", loc: [], start: "", avail: ""};
+function step1() {
+  const s = document.getElementById("step");
+  s.innerHTML = `
+  <div class="field"><label for="first">First name *</label><input id="first" name="first" required></div>
+  <div class="field"><label for="last">Last name *</label><input id="last" name="last" required></div>
+  <div class="field"><label for="email">Email *</label><input id="email" name="email" type="email" required></div>
+  <fieldset><legend>Which locations would you work from? *</legend>
+    <label><input type="checkbox" name="loc" value="remote" required> Remote</label>
+    <label><input type="checkbox" name="loc" value="hybrid"> Hybrid</label>
+    <label><input type="checkbox" name="loc" value="onsite"> On-site</label>
+  </fieldset>
+  <div class="field"><label for="start">Earliest start date *</label><input id="start" name="start" type="date" required></div>
+  <div class="field"><label for="avail">Date available *</label><input id="avail" name="avail" placeholder="MM/DD/YYYY" required></div>
+  <button type="button" id="next">Next</button>`;
+  for (const k of ["first", "last", "email", "start", "avail"]) {
+    const el = document.getElementById(k);
+    el.value = state[k];
+    el.addEventListener("input", () => { state[k] = el.value; });
+    el.addEventListener("change", () => { state[k] = el.value; });
+  }
+  for (const c of s.querySelectorAll("input[name=loc]")) {
+    c.checked = state.loc.includes(c.value);
+    c.addEventListener("change", () => { state.loc = Array.from(s.querySelectorAll("input[name=loc]:checked")).map(x => x.value); });
+  }
+  document.getElementById("next").onclick = () => {
+    if (!state.loc.length) { alert("Pick a location"); return; }
+    if (q.get("timeout")) { expired(); return; }
+    step2();
+  };
+}
+function step2() {
+  const s = document.getElementById("step");
+  s.innerHTML = `
+  <div class="field"><label for="cv">Resume/CV *</label><input id="cv" name="cv" type="file" accept=".pdf" required>
+    <div id="cv-err" class="err"></div></div>
+  <div class="field"><label for="why">Why do you want to work at Example Corp?</label><textarea id="why" name="why"></textarea></div>
+  <button type="button" id="back">Back</button> <button type="button" id="submit">Submit application</button>`;
+  const cv = document.getElementById("cv");
+  cv.addEventListener("change", () => {
+    const f = cv.files[0];
+    if (f && f.size > 1024 * 1024) { document.getElementById("cv-err").textContent = "File is too large (max 1 MB)."; cv.value = ""; }
+    else document.getElementById("cv-err").textContent = "";
+  });
+  document.getElementById("back").onclick = () => { if (q.get("reset")) state.start = ""; step1(); };
+  document.getElementById("submit").onclick = () => {
+    if (!cv.files.length) { document.getElementById("cv-err").textContent = "This field is required."; return; }
+    s.innerHTML = "<h2>Thank you for applying to Example Corp!</h2>";
+  };
+}
+function expired() {
+  document.getElementById("step").innerHTML =
+    "<h2>Your session has expired</h2><p>For your security, please sign in again to continue your application.</p>";
+}
+step1();
+</script>
+</body></html>

@@ -132,7 +132,7 @@ SCAN_JS = r"""() => {
     } else {
       value = el.value || ''; empty = value.trim() === '' && !(combo && comboHasValue(el));
     }
-    out.push({key, kind, type, name: el.name || '', id: el.id || '', label, required: isRequired(el, label), empty, options, value});
+    out.push({key, kind, type, name: el.name || '', id: el.id || '', label, required: isRequired(el, label), empty, options, value, placeholder: clean(el.getAttribute('placeholder') || '')});
   }
   for (const [gname, els] of groups) {
     const key = 'g:' + gname;
@@ -285,6 +285,7 @@ class Field:
     name: str = ""
     id: str = ""
     value: str = ""
+    placeholder: str = ""
 
     @property
     def category(self) -> str:
@@ -312,6 +313,7 @@ def parse_fields(raw: Any) -> list[Field]:
             key=d["key"], kind=d.get("kind", "text"), label=d.get("label", "") or "",
             required=bool(d.get("required")), empty=bool(d.get("empty")), options=d.get("options") or [],
             type=d.get("type", ""), name=d.get("name", ""), id=d.get("id", ""), value=d.get("value", "") or "",
+            placeholder=d.get("placeholder", "") or "",
         ))
     return out
 
@@ -455,7 +457,7 @@ def _profile_answer(label: str, profile: dict, context: dict) -> str | None:
         (r"\b(current|most recent) (title|role|position)\b", p.get("current_role")),
         (r"\b(current|most recent) (company|employer)\b", p.get("current_company")),
         (r"\byears of (professional )?experience\b|\bhow many years\b", p.get("years_of_experience")),
-        (r"\b(notice period|start date|when can you start|availability)\b", p.get("notice_period")),
+        (r"\b(notice period|start date|when can you start|availability|date available|available (to start|from))\b", p.get("notice_period")),
         (r"\b(salary|compensation|pay) (expectation|requirement|range)s?\b|\bdesired (salary|pay)\b",
          (f"{sal.get('min')}" if sal.get("min") else None)),
         (r"\bhow did you (hear|find|learn)\b|\bsource\b|\breferr(ed|al) source\b", context.get("source")),
@@ -503,7 +505,65 @@ def best_option(options: list[dict], answer: str) -> str | None:
     return None
 
 
-def plan_answer(f: Field, profile: dict, qa: dict, context: dict | None = None) -> str | None:
+_DATE_FMT_RE = re.compile(r"\b(mm|dd)[/.-](dd|mm)[/.-](yyyy|yy)\b|\byyyy[/.-]mm[/.-]dd\b", re.I)
+_REL_RE = re.compile(r"^(?:in\s+)?(\d{1,3}|one|two|three|four|six|eight)\s*(day|week|month)s?(?:'?\s*notice)?$", re.I)
+_NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "six": 6, "eight": 8}
+
+
+def _date_format(f: Field) -> str | None:
+    """'iso' for <input type=date>, or the strftime pattern a text date field asks for, else None."""
+    if f.type == "date":
+        return "%Y-%m-%d"
+    m = _DATE_FMT_RE.search(f"{f.placeholder} {f.label}")
+    if not m:
+        return None
+    tok = m.group(0).lower()
+    sep = next((c for c in tok if c in "/.-"), "/")
+    if tok.startswith("yyyy"):
+        return f"%Y{sep}%m{sep}%d"
+    year = "%Y" if tok.endswith("yyyy") else "%y"
+    return f"%m{sep}%d{sep}{year}" if tok.startswith("mm") else f"%d{sep}%m{sep}{year}"
+
+
+def _as_date(answer: str, today=None):
+    """A profile answer ("2 weeks", "immediately", "2026-12-01", "12/01/2026") as a date, or None."""
+    from datetime import date, datetime, timedelta
+    today = today or date.today()
+    a = " ".join(str(answer or "").lower().split()).strip(" .")
+    if a in ("immediately", "now", "asap", "right away", "today", "0", "none", "no notice"):
+        return today
+    m = _REL_RE.match(a)
+    if m:
+        n = int(m.group(1)) if m.group(1).isdigit() else _NUM[m.group(1)]
+        days = {"day": 1, "week": 7, "month": 30}[m.group(2)] * n
+        return today + timedelta(days=days)
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%B %d, %Y", "%b %d, %Y", "%d %B %Y"):
+        try:
+            return datetime.strptime(a.title() if "%b" in fmt.lower() else a, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _multi_option(options: list[dict], answer: str) -> str | list[str] | None:
+    """'Remote, Hybrid' on a checkbox group ticks both; a single answer stays a single string."""
+    parts = [p for p in re.split(r"\s*(?:[,;/]|\band\b|&)\s*", answer or "") if p.strip()]
+    if len(parts) < 2:
+        return best_option(options, answer)
+    whole = best_option(options, answer)
+    if whole and normalize(whole) == normalize(answer):
+        return whole                      # an option literally called "Remote / Hybrid"
+    picks: list[str] = []
+    for p in parts:
+        t = best_option(options, p)
+        if t and t not in picks:
+            picks.append(t)
+    if not picks:
+        return None
+    return picks if len(picks) > 1 else picks[0]
+
+
+def plan_answer(f: Field, profile: dict, qa: dict, context: dict | None = None) -> str | list[str] | None:
     """Truthful answer for a field from profile / answer bank, or None.
 
     None means the agent must compose the answer itself from the resume (essays,
@@ -545,7 +605,14 @@ def plan_answer(f: Field, profile: dict, qa: dict, context: dict | None = None) 
         answer = "Yes"
     if answer is None:
         return None
-    if f.kind in ("select", "radio", "checkbox_group", "combobox") and f.options:
+    fmt = _date_format(f) if f.kind == "text" else None
+    if fmt:
+        # A date picker takes a date, not "2 weeks": convert, or leave it for the agent.
+        d = _as_date(answer)
+        return d.strftime(fmt) if d else None
+    if f.kind == "checkbox_group" and f.options:
+        return _multi_option(f.options, answer)
+    if f.kind in ("select", "radio", "combobox") and f.options:
         return best_option(f.options, answer)
     if f.kind == "checkbox":
         yn = _yes_no(answer)

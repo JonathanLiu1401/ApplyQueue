@@ -36,6 +36,10 @@ NEGATIVE_TEXT_PATTERNS: tuple[str, ...] = (
     r"(this|a) field is required",
     r"application (could not|couldn't|failed to) be (submitted|sent)",
     r"something went wrong",
+    # A timed-out session often lands on a login page whose URL carries the confirmation path as the
+    # redirect target ("/login?next=/application/confirmation"); that is not a submission.
+    r"session (has |had )?(expired|timed out|ended)|your session (is no longer valid|has ended)",
+    r"please (sign|log) ?in again|(sign|log) ?in again to (continue|finish|resume|complete)",
 )
 
 _text_re = [re.compile(p, re.I) for p in CONFIRMATION_TEXT_PATTERNS]
@@ -54,6 +58,21 @@ class PageEvidence:
         return {"confirmed": self.confirmed, "matched": self.matched, "url": self.url, "source": self.source}
 
 
+_REDIRECT_KEYS = re.compile(r"^(next|redirect|redirect_?ur[il]|return|return_?to|returnurl|continue|goto|target|"
+                            r"callback|dest|destination|from|ref|state)$", re.I)
+
+
+def _url_without_redirects(url: str) -> str:
+    """The URL minus query parameters that only name where to go next (login redirects)."""
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return url
+    q = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if not _REDIRECT_KEYS.match(k)]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(q), parts.fragment))
+
+
 def detect_confirmation(page_text: str, url: str = "") -> PageEvidence:
     """Return page evidence of a submitted application, read by our own code."""
     text = re.sub(r"\s+", " ", page_text or "")
@@ -65,7 +84,7 @@ def detect_confirmation(page_text: str, url: str = "") -> PageEvidence:
         if m:
             return PageEvidence(True, matched=m.group(0), url=url, source="text")
     for rx in _url_re:
-        m = rx.search(url or "")
+        m = rx.search(_url_without_redirects(url or ""))
         if m:
             return PageEvidence(True, matched=m.group(0), url=url, source="url")
     return PageEvidence(False, url=url)

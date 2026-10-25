@@ -60,9 +60,23 @@ def _company_hit(company: str, hay: str, squashed: str) -> bool:
     if not words:
         return False
     phrase = " ".join(words)
+    if f" {phrase} " in f" {hay} ":
+        return True
     if len(phrase) < 3:
-        return bool(re.search(rf"\b{re.escape(phrase)}\b", hay))
-    return f" {phrase} " in f" {hay} " or phrase.replace(" ", "") in squashed
+        return False
+    # "DataDog" vs "Data Dog" (either way round), but on word boundaries only: "Box" is not in "inbox" or
+    # "Dropbox", "Ramp" is not in "trampoline".
+    flat = phrase.replace(" ", "")
+    toks = hay.split()
+    for i in range(len(toks)):
+        joined = ""
+        for t in toks[i:i + 4]:
+            joined += t
+            if joined == flat:
+                return True
+            if len(joined) >= len(flat):
+                break
+    return False
 
 
 def kind(msg: dict) -> str | None:
@@ -135,7 +149,7 @@ def job_score(msg: dict, job: dict) -> int:
     job_host = _host(job.get("url") or "")
     score = 0
     if job.get("company") and _company_hit(job["company"], hay, squashed):
-        score += 5
+        score += 5 + min(len(company_tokens(job["company"])) - 1, 3)  # "Acme Widgets" beats "Acme"
     if job_host and dom and _root(dom) == _root(job_host) and not dom.endswith(ATS_DOMAINS):
         score += 5  # the employer's own domain
     if not score:
@@ -163,8 +177,11 @@ def match_job(msg: dict, jobs: list[dict], *, slack_s: float = 300) -> dict | No
     if not scored:
         return None
     scored.sort(key=lambda t: (t[0], t[1]), reverse=True)
-    if len(scored) > 1 and scored[0][0] == scored[1][0] and not scored[0][1] and not scored[1][1]:
-        return None  # ambiguous
+    if len(scored) > 1 and scored[0][0] == scored[1][0]:
+        # Two applications fit equally well (same company, title not in the email). The newer one is not
+        # necessarily the one this email is about (mail can lag by minutes), and confirming the wrong job is
+        # worse than leaving both for review.
+        return None
     return scored[0][2]
 
 

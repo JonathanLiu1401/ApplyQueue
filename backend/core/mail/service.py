@@ -99,6 +99,22 @@ def has_linked_account() -> bool:
     return bool(linked_providers())
 
 
+def reauth_providers() -> list[str]:
+    """Mailboxes that were linked but whose sign-in was revoked or expired (invalid_grant)."""
+    out = []
+    for p in oauth.PROVIDERS:
+        acct = oauth._account(p)
+        if acct.get("refresh_token") and acct.get("needs_reauth"):
+            out.append(p)
+    return out
+
+
+def reauth_message(provs: list[str] | None = None) -> str:
+    names = " / ".join(oauth.NAMES[p] for p in (provs or reauth_providers())) or "Mailbox"
+    return (f"{names} sign-in expired (re-auth needed): reconnect the mailbox in Settings > Email, then resume. "
+            "Use report_needs_human for this code meanwhile.")
+
+
 def _evidence(msg: dict) -> dict:
     return {"message_id": msg["id"], "provider": msg["provider"], "from_domain": msg.get("from_domain", ""),
             "subject": (msg.get("subject") or "")[:200],
@@ -124,19 +140,32 @@ def _label(provider: str, client, msg: dict, label: str, archive: bool) -> str |
 # ── OTP ─────────────────────────────────────────────────────────────────
 def get_otp(hint: str = "", since_minutes: int = 15, wait_seconds: int = 90, job_url: str = "",
             exclude_ids: list[str] | None = None) -> dict | None:
-    """Newest verification code (or verify link) from the linked mailbox(es), waiting for it to arrive."""
+    """Newest verification code (or verify link) from the linked mailbox(es), waiting for it to arrive.
+
+    Raises oauth.ReauthRequired as soon as no usable mailbox is left (e.g. invalid_grant mid-run), instead of
+    waiting out ``wait_seconds`` and telling the agent to request yet another code."""
     since = time.time() - max(1, int(since_minutes)) * 60
     deadline = time.monotonic() + max(0, int(wait_seconds))
     skip = set(exclude_ids or [])
     settings = get_settings()
     while True:
         best = None
-        for p in linked_providers():
+        live = linked_providers()
+        if not live:
+            gone = reauth_providers()
+            if gone:
+                raise oauth.ReauthRequired(reauth_message(gone))
+            return None  # unlinked while waiting
+        for p in live:
             client = providers.client_for(p)
             try:
                 msgs = client.list_recent(since, limit=25)
             except (providers.MailApiError, oauth.ReauthRequired):
                 continue
+            # A code already handed out (its email is in exclude_ids) is never handed out again, even when the
+            # site's mailer delivers it twice under a new message id.
+            used = {classify.extract_code(m["subject"] + "\n" + m["text"]) for m in msgs if m["id"] in skip}
+            used.discard(None)
             for m in msgs:
                 if m["id"] in skip or classify.kind(m) != "verification":
                     continue
@@ -144,7 +173,7 @@ def get_otp(hint: str = "", since_minutes: int = 15, wait_seconds: int = 90, job
                     continue
                 code = classify.extract_code(m["subject"] + "\n" + m["text"])
                 link = None if code else classify.extract_verify_link(m["text"])
-                if not (code or link):
+                if not (code or link) or (code and code in used):
                     continue
                 if best is None or m["received_at"] > best[0]["received_at"]:
                     best = (m, code, link, client)

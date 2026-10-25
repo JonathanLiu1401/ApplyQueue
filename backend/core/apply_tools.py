@@ -608,11 +608,16 @@ def build_apply_tools(*, ledger: RunLedger, profile: dict, qa: dict, context: di
         except ImportError:  # pragma: no cover
             from backend.core.mail import service as mail
         if not mail.has_linked_account():
+            if mail.reauth_providers():
+                return ActionResult(error=mail.reauth_message())
             return ActionResult(error="No mailbox is linked in ApplyQueue. Use report_needs_human for the code.")
         ctx = context or {}
-        got = await asyncio.to_thread(mail.get_otp, hint=params.sender_hint or ctx.get("company", ""),
-                                      since_minutes=15, wait_seconds=params.wait_seconds,
-                                      job_url=ctx.get("url", ""), exclude_ids=list(ledger.otp_message_ids))
+        try:
+            got = await asyncio.to_thread(mail.get_otp, hint=params.sender_hint or ctx.get("company", ""),
+                                          since_minutes=15, wait_seconds=params.wait_seconds,
+                                          job_url=ctx.get("url", ""), exclude_ids=list(ledger.otp_message_ids))
+        except mail.oauth.ReauthRequired as e:
+            return ActionResult(error=str(e) or mail.reauth_message())
         if not got:
             return ActionResult(error="No verification email arrived yet. Request a new code, then call again.")
         ledger.otp_message_ids.append(got["message_id"])

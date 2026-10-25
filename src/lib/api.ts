@@ -792,7 +792,7 @@ export interface SearchSchedule {
 
 export interface ScheduleNotice {
   kind: "reauth" | "errors";
-  target?: "ai" | "portal";
+  target?: "ai" | "portal" | "mail";
   message: string;
   action: string;
 }

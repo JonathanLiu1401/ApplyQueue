@@ -49,6 +49,7 @@ _RATE_RE = re.compile(r"\b429\b|rate.?limit|too many requests|quota|resource.?ex
 _AUTH_RE = re.compile(r"\b401\b|unauthori[sz]ed|invalid (api )?key|authentication (failed|error)|"
                       r"log(ged)?.?in (required|expired)|not (logged|signed) in|session (has )?expired|"
                       r"token (has )?expired|re-?auth|please (log|sign) in|sign-?in required|login required", re.I)
+_MAIL_RE = re.compile(r"gmail|outlook|mailbox", re.I)
 _PORTAL_RE = re.compile(r"linkedin|indeed|glassdoor|workday|greenhouse|lever|portal|captcha", re.I)
 
 
@@ -352,7 +353,12 @@ def classify(texts) -> str:
 
 
 def _notice(texts) -> dict:
-    blob = "\n".join(texts or [])
+    texts = [t for t in (texts or []) if isinstance(t, str)]
+    blob = "\n".join(texts)
+    if any(_MAIL_RE.search(t) and _AUTH_RE.search(t) for t in texts):
+        return {"kind": "reauth", "target": "mail", "action": "/settings",
+                "message": "Your mailbox sign-in expired, so verification codes cannot be read. "
+                           "Reconnect it in Settings > Email, then resume this search."}
     portal = bool(_PORTAL_RE.search(blob))
     return {"kind": "reauth", "target": "portal" if portal else "ai",
             "message": ("A job site sign-in expired. Sign in again, then resume this search."

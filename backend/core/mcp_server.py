@@ -671,14 +671,19 @@ class ApplyQueueTools:
             except ImportError:  # pragma: no cover
                 from backend.core.mail import service as mail
             if not mail.has_linked_account():
+                if mail.reauth_providers():
+                    raise ToolError(mail.reauth_message())
                 raise ToolError("No mailbox is linked in ApplyQueue (Settings > Email). Ask the user for the code "
                                 "via report_needs_human('verification code', ...).")
             job = self._job()
             hint = sender_hint or job.get("company") or ""
             used = list(self.state.ledger(job["url"]).get("otp_message_ids") or [])
-            got = await asyncio.to_thread(mail.get_otp, hint=hint, since_minutes=int(since_minutes),
-                                          wait_seconds=max(0, min(int(wait_seconds), 300)), job_url=job["url"],
-                                          exclude_ids=used)
+            try:
+                got = await asyncio.to_thread(mail.get_otp, hint=hint, since_minutes=int(since_minutes),
+                                              wait_seconds=max(0, min(int(wait_seconds), 300)), job_url=job["url"],
+                                              exclude_ids=used)
+            except mail.oauth.ReauthRequired as e:
+                raise ToolError(str(e) or mail.reauth_message()) from None
             if not got:
                 raise ToolError("No verification code arrived yet. Request a new code and call again.")
             self.state.update_ledger(lambda led: led["otp_message_ids"].append(got["message_id"]))

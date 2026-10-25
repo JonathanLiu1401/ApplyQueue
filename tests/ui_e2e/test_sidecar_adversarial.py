@@ -213,7 +213,7 @@ def test_orphaned_backend_is_replaced_by_the_next_launch(sidecar, tmp_path, monk
         for _ in range(240):
             try:
                 with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/health", timeout=2) as r:
-                    if json.loads(r.read()).get("pid") not in (orphan_pid, None):
+                    if json.loads(r.read()).get("pid") not in (orphan_pid, h["pid"], None):  # packaged: bootloader pid != child pid
                         break
             except OSError:
                 pass
@@ -221,10 +221,11 @@ def test_orphaned_backend_is_replaced_by_the_next_launch(sidecar, tmp_path, monk
         assert st.api("GET", "/settings") is not None
         assert st.proc.poll() is None
     finally:
-        try:
-            os.kill(orphan_pid, 9)
-        except OSError:
-            pass
+        for pid in {orphan_pid, (h or {}).get("pid") or orphan_pid}:
+            try:
+                os.kill(pid, 9)
+            except OSError:
+                pass
 
 
 def test_orphaned_backend_exits_on_its_own(tmp_path):
@@ -252,7 +253,14 @@ def test_orphaned_backend_exits_on_its_own(tmp_path):
         assert saw_up, "backend never came up"
         assert _free(PORT), "orphaned backend still holds the port 90 s after its window died"
     finally:
-        try:
-            os.kill(pid, 9)
+        pids = {pid}
+        try:  # the python child of a launcher/bootloader has its own pid; don't leak it onto PORT
+            with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/health", timeout=2) as r:
+                pids.add(json.loads(r.read()).get("pid") or pid)
         except OSError:
             pass
+        for p in pids:
+            try:
+                os.kill(p, 9)
+            except OSError:
+                pass

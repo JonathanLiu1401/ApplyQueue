@@ -135,14 +135,16 @@ _token_path = get_data_dir() / ".api_token"
 
 
 def _launcher_pid() -> int:
-    """The app window's pid. A PyInstaller onefile build runs as bootloader -> python, so when
-    our parent is the same executable (the bootloader), the window is its parent."""
+    """The app window's pid. Some launchers sit between the window and us and outlive the
+    window: a PyInstaller onefile bootloader (same executable as ours) and the Windows venv
+    ``python.exe`` redirector (same arguments as ours). When our parent is one of those, the
+    window is its parent."""
     pid = _LAUNCH_PPID
-    if getattr(sys, "frozen", False):
+    if getattr(sys, "frozen", False) or os.name == "nt":
         try:
             import psutil
-            parent = psutil.Process(pid)
-            if parent.exe() == psutil.Process().exe():
+            me, parent = psutil.Process(), psutil.Process(pid)
+            if parent.exe() == me.exe() or (len(me.cmdline()) > 1 and parent.cmdline()[1:] == me.cmdline()[1:]):
                 return parent.ppid()
         except Exception:
             pass

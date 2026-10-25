@@ -126,15 +126,11 @@ def test_packaged_app_wizard_and_quick_start(app, tmp_path):
     s.click("//*[@data-testid='ai-mode-local']")
     s.click("//button[normalize-space(.)='Next']")
     s.find("//*[contains(text(), 'Resume')]")
-    s.click("//button[contains(., 'Skip for now')]")
-    for _ in range(3):
-        btns = s.cmd("POST", "/elements", {"using": "xpath", "value": "//button[contains(., 'Finish Setup')]"})
-        if btns:
+    # "Skip for now" closes the whole wizard, so walk the remaining steps with Next.
+    for _ in range(6):
+        if s.cmd("POST", "/elements", {"using": "xpath", "value": "//button[contains(., 'Finish Setup')]"}):
             break
-        try:
-            s.click("//button[normalize-space(.)='Next' or contains(., 'Skip for now')]", timeout=10)
-        except AssertionError:
-            break
+        s.click("//button[normalize-space(.)='Next']", timeout=10)
     s.click("//button[contains(., 'Finish Setup')]")
     for _ in range(40):
         if _req("GET", f"{SIDECAR}/setup/status", headers=auth).get("onboarding_completed"):

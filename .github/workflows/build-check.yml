@@ -16,6 +16,7 @@ on:
       - 'package-lock.json'
       - 'pyproject.toml'
       - 'uv.lock'
+      - 'tests/webdriver/**'
       - '.github/workflows/build-check.yml'
   pull_request:
     branches: [main]
@@ -27,6 +28,7 @@ on:
       - 'package-lock.json'
       - 'pyproject.toml'
       - 'uv.lock'
+      - 'tests/webdriver/**'
       - '.github/workflows/build-check.yml'
   workflow_dispatch:
     inputs:
@@ -104,3 +106,13 @@ jobs:
           done
       - name: Compile Tauri app (no bundle, unsigned)
         run: npx tauri build --no-bundle --target ${{ matrix.target }}
+      - name: Real Tauri app over WebDriver (Linux)
+        # tauri-driver + WebKitWebDriver drive the real webview; the Rust shell spawns the bundled sidecar.
+        if: runner.os == 'Linux'
+        env:
+          UV_PYTHON_PREFERENCE: only-managed
+        run: |
+          sudo apt-get install -y webkit2gtk-driver xvfb
+          cargo install tauri-driver --locked
+          APPLYQUEUE_TAURI_APP="$PWD/src-tauri/target/${{ matrix.target }}/release/app" \
+            xvfb-run -a uv run pytest tests/webdriver -q -x -p no:cacheprovider

@@ -54,7 +54,9 @@ const EMAIL_FALSE = /@\d+x\.(png|jpe?g|webp|svg)$/i; // retina asset names like 
 // GitHub service addresses (web-flow committer, Dependabot PR bodies): not personal data.
 const EMAIL_SERVICE = /^(noreply|support)@github\.com$/i;
 const PHONE = /(?<![\w.+-])(\+?1[ .-]?)?\(?\d{3}\)?[ .-]\d{3}[ .-]\d{4}(?![\w-])/g;
-const PHONE_ALLOW = /555[ .-]?01\d\d$/;
+// Fictional: the 555-01xx line range, or the NANP area code 555 (never assigned), which an
+// early fixture used as "(555) 010-0123" and which stays in history (no rewrites).
+const PHONE_ALLOW = /555[ .-]?01\d\d$|^(\+?1[ .-]?)?\(?555\)?[ .-]/;
 // Lockfiles carry third-party package metadata (e.g. npm maintainers' public emails).
 const GENERIC_SKIP = /(^|\/)(pnpm-lock\.yaml|package-lock\.json|uv\.lock|Cargo\.lock)$/;
 

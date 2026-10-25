@@ -13,6 +13,35 @@ or tokens are used anywhere in CI; mail, GitHub and ATS endpoints are local mock
 
 CI runs: `https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/<id>`
 
+## 0. CI plan and the staged full-suite command
+
+CI was trimmed while Actions billing is blocked (commit below), to cut macOS minutes:
+
+| Trigger | What runs |
+|---|---|
+| Any push / PR touching code | **Linux checks** only: tsc, eslint, vite build, vitest, full pytest (agent e2e on mock ATS, break-it suite), packaged Linux sidecar + UI e2e. npm, uv and Playwright caches |
+| Push to `main` (code paths) | Linux checks + **Windows** + **Intel Mac** (native `macos-15-intel`: tests, x86_64 sidecar self-test, `.app`/`.dmg`, UI e2e, launch + `/health`). Build Check (real app over WebDriver, Linux + Windows) runs on its own build paths |
+| Nightly 03:23 PDT | full 4-platform suite + Build Check incl. macOS arm64, **only if `main` moved** since the last successful nightly |
+| `workflow_dispatch` | full 4-platform suite + Build Check by default |
+| Tags `v*` (build.yml) | release builds incl. native Intel Mac (unchanged) |
+
+Superseded branch/PR runs are cancelled. Runs on `main` are never cancelled, and push, nightly and
+dispatch runs no longer cancel each other. **Required checks** requires Linux + Windows +
+Intel Mac (+ Apple silicon when selected, + Build Check when it ran) on every push-to-main /
+nightly / dispatch run, and Linux checks on branch/PR runs.
+
+**Once billing is fixed, one command runs everything (Linux, Windows, Intel Mac, Apple silicon,
+plus Build Check: real Tauri app over WebDriver on Linux + Windows and the macOS arm64 build):**
+
+```bash
+gh workflow run test.yml -R JonathanLiu1401/ApplyQueue --ref main
+# watch it:
+gh run list -R JonathanLiu1401/ApplyQueue -w test.yml -L 1 --json databaseId --jq '.[0].databaseId' \
+  | xargs -I{} gh run watch {} -R JonathanLiu1401/ApplyQueue --exit-status
+```
+
+Options: `-f apple_silicon=false` skips the arm64 Mac, and `-f full=false` runs Linux checks only.
+
 ## 1. Per-OS results
 
 | OS / arch | Runner | What ran | Result |

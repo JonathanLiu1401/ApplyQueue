@@ -3,7 +3,8 @@ name: Build Check
 # Compiles the full desktop app (PyInstaller sidecar + Tauri) without publishing anything.
 # Cost control for a private repo (Linux 1x, Windows 2x, macOS 10x minutes):
 # - runs only when build-relevant paths change;
-# - push/PR builds Linux x64 + Windows x64; macOS ARM64 runs only on manual dispatch.
+# - PRs build Linux only; push to main builds Linux + Windows; macOS ARM64 only on manual
+#   dispatch or when called from test.yml (nightly / full dispatch).
 # Release builds stay in build.yml (tag/dispatch only).
 on:
   push:
@@ -36,13 +37,18 @@ on:
         description: 'Also build macOS ARM64 (~10x minutes)'
         type: boolean
         default: false
+  workflow_call:
+    inputs:
+      run_macos:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: build-check-${{ github.ref }}
-  cancel-in-progress: true
+  group: build-check-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   matrix:
@@ -52,10 +58,11 @@ jobs:
     steps:
       - id: m
         run: |
-          BASE='{"platform":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu","label":"Linux-x64"},{"platform":"windows-latest","target":"x86_64-pc-windows-msvc","label":"Windows-x64"}'
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.run_macos }}" = "true" ]; then
-            BASE="$BASE"',{"platform":"macos-latest","target":"aarch64-apple-darwin","label":"macOS-ARM64"}'
-          fi
+          BASE='{"platform":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu","label":"Linux-x64"}'
+          WIN=',{"platform":"windows-latest","target":"x86_64-pc-windows-msvc","label":"Windows-x64"}'
+          MAC=',{"platform":"macos-latest","target":"aarch64-apple-darwin","label":"macOS-ARM64"}'
+          [ "${{ github.event_name }}" != "pull_request" ] && BASE="$BASE$WIN"
+          [ "${{ inputs.run_macos }}" = "true" ] && BASE="$BASE$MAC"
           echo "include=[$BASE]" >> "$GITHUB_OUTPUT"
 
   build:

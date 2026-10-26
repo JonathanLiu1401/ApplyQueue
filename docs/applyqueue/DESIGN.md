@@ -734,18 +734,19 @@ ApplyQueue/            # github.com/JonathanLiu1401/ApplyQueue (private until th
   tests/                   # pytest (backend), plus src/**/*.test.ts (vitest)
   scripts/                 # build-backend, privacy-scan, license checks, integration test
   docs/                    # PLAN.md, applyqueue/ (design history), examples/packs/
-  .github/workflows/       # ci.yml (privacy + licenses), test.yml, build.yml
+  .github/workflows/       # ci.yml (all checks, self-hosted only), build.yml
 ```
 
 Language choice (superseded): v1 keeps LangHire's Python sidecar; no TypeScript port.
 
 ## 12. CI, packaging, auto-update
 
-- Private-repo Actions minutes cost per OS (Linux 1x, Windows 2x, macOS 10x). CI therefore:
-  `ci.yml` runs gitleaks + the personal-data scan over full history and the npm + Python license
-  checks on every push/PR (Linux only); `test.yml` (type check, lint, vite build, vitest, pytest,
-  backend binary) runs on Linux + Windows with path filters, and macOS only on manual dispatch
-  or before a release; `build.yml` (tauri-action installers) runs on tags or dispatch.
+- CI uses **self-hosted runners only**, never GitHub-hosted minutes (see
+  [CI_RUNNERS.md](CI_RUNNERS.md)). `ci.yml` holds every check (there is no `test.yml` any more):
+  gitleaks + the personal-data scan over full history, npm + Python license checks, type check,
+  lint, vite build, vitest, pytest, and the packaged backend binary. It runs on the Linux box
+  runner for code pushes to `main` and on manual dispatch (opt-in `linux_app` WebDriver, Windows,
+  Intel Mac, Apple silicon); never on PRs or forks. `build.yml` (installers) runs on dispatch.
 - The repo never contains secrets, credentials, sessions, or personal data; those belong only
   in each user's private sync repo and OS keychain.
 - Packaging: `tauri build` with the PyInstaller sidecar as `externalBin`. macOS dmg/app

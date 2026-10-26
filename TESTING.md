@@ -2,7 +2,9 @@
 
 ApplyQueue has two test suites — a **Python/pytest** suite for the FastAPI backend and a
 **Vitest + React Testing Library** suite for the React frontend. Both produce coverage reports
-and run in CI (`.github/workflows/test.yml`) on every push/PR across macOS, Linux, and Windows.
+and run in CI (`.github/workflows/ci.yml`) on self-hosted runners only: Linux on every code push to
+`main`, plus Windows and macOS when a runner is online and the run is dispatched (see
+[docs/applyqueue/CI_RUNNERS.md](docs/applyqueue/CI_RUNNERS.md)).
 
 ## Quick start
 

@@ -117,9 +117,19 @@ sudo tail -f /home/aqrunner/runner-supervisor.log
 ```
 
 It survives agent sessions and runner crashes, but **not a reboot of the box**: after one, run
-`start` again (an agent can do it). System libraries for Tauri/WebKitGTK/WebDriver/Playwright
-(`libwebkit2gtk-4.1-dev`, `webkit2gtk-driver`, `xvfb`, ...) are preinstalled on the host so jobs
-never need sudo.
+`start` again (an agent can do it).
+
+**Restart after a reboot or a box restore.** After a plain reboot, `sudo bash
+scripts/runners/linux-box-runner.sh start` is enough. A box restore can also drop the `aqrunner`
+user, `/home/aqrunner` and the system packages below (it did on 2026-10-25). Then: `sudo useradd
+-m -s /bin/bash aqrunner && sudo chmod 750 /home/aqrunner`, reinstall the packages, download the
+latest `actions-runner-linux-x64` release into `/home/aqrunner/actions-runner-applyqueue` as
+`aqrunner` (check its SHA-256 against the release notes), register again with the command below,
+then `start`. Confirm it shows `online` with the "check runners" command above. System libraries for Tauri/WebKitGTK/WebDriver are preinstalled on
+the host so jobs never need sudo: `libwebkit2gtk-4.1-dev build-essential curl wget file
+libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb`.
+
+Never run a Windows VM on the box: booting one crashed the shared box twice on 2026-10-25.
 
 Register again from scratch (token never written anywhere):
 

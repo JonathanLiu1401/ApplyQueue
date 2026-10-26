@@ -609,6 +609,7 @@ export interface SyncStatus {
   offline: boolean;
   pending: number;
   visibility_error: string | null;
+  auth_error?: string | null;
   verified_private_at: string | null;
   held_locks: string[];
   devices?: string[];
@@ -649,7 +650,7 @@ export async function setupSyncRepo(name: string, create = true) {
 }
 
 export async function syncNow() {
-  return request<{ success: boolean; pending?: number; offline?: boolean; refused?: string }>("/sync/now", {
+  return request<{ success: boolean; pending?: number; offline?: boolean; refused?: string; auth_error?: string }>("/sync/now", {
     method: "POST",
   });
 }

@@ -15,8 +15,8 @@ from mock_github import FAKE_TOKEN, MockGitHub  # noqa: E402
 from core import job_status as js  # noqa: E402
 from core import jobs_store, token_guard  # noqa: E402
 from core.credential_vault import CredentialVault  # noqa: E402
-from core.sync import crypto, github, store  # noqa: E402
-from core.sync.engine import SyncEngine, job_key, sanitize_storage_state  # noqa: E402
+from core.sync import crypto, github, gitrepo, store  # noqa: E402
+from core.sync.engine import LEDGER, SyncEngine, job_key, sanitize_storage_state  # noqa: E402
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 
@@ -550,3 +550,75 @@ def test_remote_rewound_by_force_push_is_restored(world):
     assert jobs_store.get_job(JOB_A)["status"] == js.CONFIRMED
     ledger = [json.loads(ln) for ln in world.remote_file("ledger/applications.jsonl").splitlines()]
     assert len({e["id"] for e in ledger}) == len(ledger)  # no duplicated events after the re-merge
+
+
+# ── a token GitHub refuses (found by the real github.com e2e, tests/e2e/test_sync_real_github_e2e.py) ──
+
+@pytest.mark.parametrize("stderr,kind", [
+    ("remote: Invalid username or token. Password authentication is not supported for Git operations.\n"
+     "fatal: Authentication failed for 'https://github.com/alex-example/applyqueue-state.git/'", gitrepo.AuthError),
+    ("fatal: could not read Username for 'https://github.com': terminal prompts disabled", gitrepo.AuthError),
+    ("remote: Repository not found.\nfatal: repository 'https://github.com/alex-example/x.git/' not found",
+     gitrepo.AuthError),
+    ("remote: Permission to alex-example/applyqueue-state.git denied to alex-bot.\n"
+     "fatal: unable to access 'https://github.com/alex-example/applyqueue-state.git/': "
+     "The requested URL returned error: 403", gitrepo.AuthError),
+    ("fatal: unable to access 'https://github.com/alex-example/x.git/': Could not resolve host: github.com",
+     gitrepo.NetworkError),
+    ("fatal: unable to access 'https://github.com/x/': Failed to connect to 127.0.0.1 port 9", gitrepo.NetworkError),
+])
+def test_git_auth_failures_are_not_mistaken_for_offline(tmp_path, monkeypatch, stderr, kind):
+    monkeypatch.setattr(gitrepo.subprocess, "run",
+                        lambda *a, **k: subprocess.CompletedProcess(a[0], 128, "", stderr))
+    with pytest.raises(gitrepo.GitError) as ei:
+        gitrepo.GitRepo(tmp_path).run("fetch", "--quiet", "origin")
+    assert type(ei.value) is kind
+
+
+def test_revoked_token_pauses_sync_with_a_clear_message_then_recovers(world):
+    a = world.use("laptop")
+    add_job(JOB_A)
+    assert a.sync_now()["ok"]
+    store.save_token({"access_token": "gho" + "_" + "R" * 36, "source": "test"})   # revoked on GitHub
+    jobs_store.update_job(JOB_A, status=js.SUBMITTED_UNCONFIRMED)
+    r = SyncEngine().sync_now()
+    assert r["ok"] is False and r["pushed"] is False and r["pending"] >= 1, r
+    assert "refused the token" in r["auth_error"] and "alex-example/applyqueue-state" in r["auth_error"]
+    assert "R" * 36 not in json.dumps(r)
+    assert "submitted" not in (world.remote_file(LEDGER) or "")
+    assert SyncEngine().status()["auth_error"] == r["auth_error"]
+    store.save_token({"access_token": FAKE_TOKEN, "source": "test"})                # linked again
+    r = SyncEngine().sync_now()
+    assert r["ok"] and r["pushed"] and r["pending"] == 0, r
+    assert "submitted" in world.remote_file(LEDGER)
+    assert SyncEngine().status()["auth_error"] is None
+
+
+def test_git_refusing_the_token_on_first_clone_is_reported_not_raised(world, monkeypatch):
+    world.use("desktop")
+
+    def refuse(self, url):
+        raise gitrepo.AuthError("refused", "fatal: Authentication failed for 'https://github.example/'")
+    monkeypatch.setattr(gitrepo.GitRepo, "clone", refuse)
+    r = SyncEngine().sync_now()
+    assert r == {"ok": False, "auth_error": r["auth_error"], "offline": False, "pushed": False, "pending": 0}
+    assert "Link GitHub again" in r["auth_error"]
+    assert not store.repo_dir().joinpath(".git").exists()
+
+
+def test_unlinked_github_says_so(world):
+    a = world.use("laptop")
+    add_job(JOB_A)
+    a.sync_now()
+    store.clear_token()
+    jobs_store.update_job(JOB_A, status=js.SUBMITTED_UNCONFIRMED)
+    r = SyncEngine().sync_now()
+    assert r["ok"] is False and r["auth_error"] == "GitHub is not linked.", r
+
+
+def test_token_without_push_permission_is_reported(world):
+    world.gh.repos[FULL]["permissions"] = {"push": False, "pull": True}
+    a = world.use("laptop")
+    add_job(JOB_A)
+    r = a.sync_now()
+    assert r["ok"] is False and "cannot push" in r["auth_error"], r

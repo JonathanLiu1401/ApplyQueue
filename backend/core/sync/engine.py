@@ -41,7 +41,7 @@ except ImportError:  # pragma: no cover
     from backend.core.credential_vault import CredentialVault, normalize_host
 
 from . import crypto, github, store
-from .gitrepo import GitError, GitRepo, NetworkError, PushRejected, git_available
+from .gitrepo import AuthError, GitError, GitRepo, NetworkError, PushRejected, git_available
 
 log = logging.getLogger(__name__)
 
@@ -751,42 +751,78 @@ class SyncEngine:
         return n
 
     def sync_now(self) -> dict:
-        """Pull, merge jobs both ways, sync credentials, heartbeat, push."""
-        out: dict = {"ok": True}
+        """Pull, merge jobs both ways, sync credentials, heartbeat, push.
+
+        A token GitHub refuses (expired, revoked, no access to the repo) is not "offline" and not
+        a crash: the result says so, local changes stay queued, and status() shows it until a
+        sync succeeds again."""
         with self._lock:
-            repo = self.ensure_repo()
             try:
-                lost = self._pull(repo)
-                out["lost_locks"] = lost
-                out["offline"] = False
-            except NetworkError:
-                out["offline"] = True
-            self._ensure_layout()
-            out["imported"] = self._import_jobs()
-            out["exported"] = self._export_jobs()
-            out["released"] = self._release_finished(repo)
-            try:
-                out["schedules"] = self._sync_schedules()
-            except Exception as e:  # schedules must never break job/credential sync
-                log.warning("schedule sync failed: %s", type(e).__name__)
-            if self.credentials_allowed():
+                out = self._sync_now()
+            except github.NotPrivate:
+                raise
+            except (AuthError, github.GitHubError) as e:
+                if isinstance(e, github.Offline):
+                    raise
+                msg = self._auth_message(e)
+                out = {"ok": False, "auth_error": msg, "offline": False, "pushed": False}
                 try:
-                    out["credentials"] = self.sync_credentials()
-                except github.NotPrivate as e:
-                    out["credentials"] = {"refused": str(e)}
-                    out["ok"] = False
-                except github.Offline:
-                    out["credentials"] = {"pending": "offline; credentials stay local until GitHub is reachable"}
-                except crypto.KeyMissing as e:
-                    out["credentials"] = {"error": str(e)}
-            self._write(f"workers/{self.device}.json", json.dumps(
-                {"device": self.device, "label": self.label, "last_seen": _now()}, indent=2) + "\n")
-            repo.commit_all(f"sync from {self.label}")
+                    out["pending"] = self.repo().ahead() if self.repo().exists() else 0
+                except GitError:
+                    out["pending"] = 0
+                self._update_state(auth_error=msg, last_result=out)
+                return out
+            if out.get("ok") and (out.get("offline") is False or out.get("pushed")):
+                self._update_state(auth_error=None)
+            return out
+
+    def _auth_message(self, e: Exception) -> str:
+        where = f"{self.cfg.get('owner')}/{self.cfg.get('repo')}" if self.is_github else "the sync remote"
+        if isinstance(e, github.GitHubError) and str(e) in ("GitHub is not linked.",
+                                                             "The GitHub sign-in expired. Link GitHub again."):
+            return str(e)
+        if isinstance(e, github.GitHubError) and "cannot push" in str(e):
+            return f"This GitHub token cannot push to {where}. Link GitHub again with write access to it."
+        return f"GitHub refused the token for {where} (expired, revoked, or no access). Link GitHub again."
+
+    def _sync_now(self) -> dict:
+        out: dict = {"ok": True}
+        repo = self.ensure_repo()
+        try:
+            lost = self._pull(repo)
+            out["lost_locks"] = lost
+            out["offline"] = False
+        except NetworkError:
+            out["offline"] = True
+        self._ensure_layout()
+        out["imported"] = self._import_jobs()
+        out["exported"] = self._export_jobs()
+        out["released"] = self._release_finished(repo)
+        try:
+            out["schedules"] = self._sync_schedules()
+        except Exception as e:  # schedules must never break job/credential sync
+            log.warning("schedule sync failed: %s", type(e).__name__)
+        if self.credentials_allowed():
             try:
-                out.update(self._push(repo))
+                out["credentials"] = self.sync_credentials()
             except github.NotPrivate as e:
-                out.update(ok=False, refused=str(e), pending=repo.ahead())
-            self._update_state(last_sync=_now(), last_result={k: v for k, v in out.items() if k != "credentials"})
+                out["credentials"] = {"refused": str(e)}
+                out["ok"] = False
+            except github.Offline:
+                out["credentials"] = {"pending": "offline; credentials stay local until GitHub is reachable"}
+            except crypto.KeyMissing as e:
+                out["credentials"] = {"error": str(e)}
+            except github.GitHubError:
+                # Token refused: keep logins local, still queue job changes; _push reports it.
+                out["credentials"] = {"pending": "GitHub refused the token; credentials stay local"}
+        self._write(f"workers/{self.device}.json", json.dumps(
+            {"device": self.device, "label": self.label, "last_seen": _now()}, indent=2) + "\n")
+        repo.commit_all(f"sync from {self.label}")
+        try:
+            out.update(self._push(repo))
+        except github.NotPrivate as e:
+            out.update(ok=False, refused=str(e), pending=repo.ahead())
+        self._update_state(last_sync=_now(), last_result={k: v for k, v in out.items() if k != "credentials"})
         return out
 
     def status(self) -> dict:
@@ -802,6 +838,7 @@ class SyncEngine:
                 "last_sync": st.get("last_sync"), "offline": bool(st.get("offline")),
                 "pending": 0, "visibility_error": st.get("visibility_error"),
                 "verified_private_at": st.get("verified_private_at"),
+                "auth_error": st.get("auth_error"),
                 "held_locks": sorted(st.get("held_locks", {}))}
         try:
             if repo.exists():

@@ -14,6 +14,7 @@ import {
   unlinkSync,
   type SyncStatus,
 } from "../../lib/api";
+import { syncNote } from "./syncNote";
 
 export const SYNC_WARNING =
   "This repository holds your job portal passwords and signed-in sessions. It must stay private. Anyone with access to it can sign in as you. Never make it public, never add collaborators you would not give your passwords to.";
@@ -120,6 +121,11 @@ export default function SyncSection() {
             Sync paused: {st.visibility_error} Your logins stay on this device until the repo is private again.
           </p>
         )}
+        {st?.auth_error && (
+          <p className="text-[13px] text-red-600" role="alert">
+            Sync paused: {st.auth_error} Your changes stay on this device until sync works again.
+          </p>
+        )}
 
         {st && !st.github_linked && (
           <div className="space-y-2">
@@ -174,7 +180,7 @@ export default function SyncSection() {
                 {st.pending ? ` · ${st.pending} change(s) waiting to upload` : ""}
               </span>
               <button className={btn} disabled={busy}
-                onClick={() => run(async () => { const r = await syncNow(); setNote(r.offline ? "Offline: changes are queued." : "Synced."); })}>
+                onClick={() => run(async () => { const r = await syncNow(); setNote(syncNote(r)); })}>
                 <RefreshCw className="w-3.5 h-3.5 inline mr-1" />Sync now
               </button>
             </div>

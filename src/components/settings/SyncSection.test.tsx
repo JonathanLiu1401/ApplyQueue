@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import SyncSection, { SYNC_WARNING } from "./SyncSection";
+import { syncNote } from "./syncNote";
 import * as api from "../../lib/api";
 
 vi.mock("../../lib/api", () => ({
@@ -62,5 +63,27 @@ describe("SyncSection", () => {
     expect(screen.getByText(/2 change\(s\) waiting/)).toBeTruthy();
     await userEvent.click(screen.getByText("Sync now"));
     expect(await screen.findByText("Offline: changes are queued.")).toBeTruthy();
+  });
+
+  it("never says Synced when the token was refused or the repo turned public", async () => {
+    vi.mocked(api.getSyncStatus).mockResolvedValue(status({
+      github_linked: true, configured: true, owner: "alex-example", repo: "applyqueue-state",
+      auth_error: "GitHub refused the token for alex-example/applyqueue-state (expired, revoked, or no access). Link GitHub again.",
+      config: { ...cfg, enabled: true },
+    }));
+    vi.mocked(api.syncNow).mockResolvedValueOnce({ success: false, auth_error: "GitHub refused the token." });
+    render(<SyncSection />);
+    expect((await screen.findByRole("alert")).textContent).toContain("refused the token");
+    await userEvent.click(screen.getByText("Sync now"));
+    expect(await screen.findByText("Not synced: GitHub refused the token.")).toBeTruthy();
+    expect(screen.queryByText("Synced.")).toBeNull();
+  });
+
+  it("syncNote covers every sync outcome", () => {
+    expect(syncNote({ success: true })).toBe("Synced.");
+    expect(syncNote({ success: true, offline: true })).toBe("Offline: changes are queued.");
+    expect(syncNote({ success: false, refused: "The state repo is public." })).toBe("Not synced: The state repo is public.");
+    expect(syncNote({ success: false, auth_error: "Bad token." })).toBe("Not synced: Bad token.");
+    expect(syncNote({ success: false })).toBe("Not synced.");
   });
 });

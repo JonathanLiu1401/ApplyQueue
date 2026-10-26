@@ -28,6 +28,16 @@ class NetworkError(GitError):
     pass
 
 
+class AuthError(GitError):
+    """The remote answered but refused us: bad, expired or revoked token, or no access to the repo."""
+
+
+# Checked before _NET_HINTS: github.com's 401/403 come back as "unable to access ... error: 403".
+_AUTH_HINTS = ("authentication failed", "invalid username or", "could not read username",
+               "could not read password", "repository not found", "returned error: 401",
+               "returned error: 403", "permission to", "access denied", "write access to repository not granted")
+
+
 _NET_HINTS = ("could not resolve host", "unable to access", "connection refused", "timed out",
               "failed to connect", "does not appear to be a git repository", "could not read from remote",
               "network is unreachable", "no such file or directory", "does not exist",
@@ -79,6 +89,8 @@ class GitRepo:
             if "[rejected]" in low or "non-fast-forward" in low or "fetch first" in low \
                     or any(h in low for h in _RACE_HINTS):
                 raise PushRejected("push rejected", err)
+            if any(h in low for h in _AUTH_HINTS):
+                raise AuthError("the git remote refused this token (expired, revoked, or no access to the repo)", err)
             if any(h in low for h in _NET_HINTS):
                 raise NetworkError("remote unreachable", err)
             raise GitError(f"git {args[0]} failed", err)

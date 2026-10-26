@@ -12,6 +12,11 @@
 > **Status: pre-alpha, private.** This repository stays private until the full end-to-end and
 > break-it test suite passes on macOS, Windows, and Linux and the maintainer approves the test
 > report. See [docs/PLAN.md](docs/PLAN.md).
+>
+> **Tested platforms today:** Linux x86_64 (full suite on every push). **Windows is untested**:
+> no real Windows hardware is available, so nothing since the last GitHub-hosted run (dd77c14) has
+> run on Windows. Intel Mac waits for its CI runner; Apple silicon is untested (no machine). See
+> [docs/applyqueue/TEST_REPORT.md](docs/applyqueue/TEST_REPORT.md).
 
 **Works with:** Grok Bot (recommended) · Claude Code · Grok Build · Cursor CLI · ChatGPT / Codex
 · Gemini (API key) · any API key LangHire already supports (OpenAI, Anthropic, Bedrock, Gemini,

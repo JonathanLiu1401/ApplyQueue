@@ -1,6 +1,6 @@
 # ApplyQueue M8 test report (e2e + break-it)
 
-Status: **Ready for Art's publish review on Linux; Windows, Intel Mac and Apple silicon are blocked on Art (see "Blocked on Art")**. Last update: 2026-10-25 21:45 PDT (code at df69d6e; CI on self-hosted runners only).
+Status: **Ready for Art's publish review on Linux.** Windows and Apple silicon are **untested** (no real hardware); the Intel Mac runner waits on Art (see "Blocked on Art"). Last update: 2026-10-25 PDT, late evening (code at e6b3d89; CI on self-hosted runners only).
 
 ## Summary
 
@@ -9,7 +9,8 @@ Status: **Ready for Art's publish review on Linux; Windows, Intel Mac and Apple 
   packaged sidecar + UI e2e) **and** for the real Tauri app over WebDriver plus the .deb bundle
   ([40252747851](https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/40252747851), code = ff49fe2;
   M9 code 45f16cb: [40264078819](https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/40264078819), 1095 pytest passed;
-  "not answered" code df69d6e: [40269230062](https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/40269230062), 1126 pytest and 530 vitest passed).
+  "not answered" code df69d6e: [40269230062](https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/40269230062), 1126 pytest and 530 vitest passed;
+  sync-token fix e6b3d89: locally 1136 pytest passed (9 opt-in github.com tests skipped) and 532 vitest passed, CI run linked from the push).
 - **Break-it:** M8 covered corrupt files, crashes, second instances, disk full, prompt injection,
   hostile pages, sync races, DST, mail token expiry and multi-step forms. M9 (§3, last rows)
   added malformed résumé PDFs, sloppy LLM replies, wrong-typed request bodies and settings,
@@ -17,9 +18,15 @@ Status: **Ready for Art's publish review on Linux; Windows, Intel Mac and Apple 
   M9, all fixed with tests** (§5). Profile preferences the user never answered (sponsorship,
   relocation, salary, work mode) are now stored as "not answered" instead of a preset, and a form
   that asks one goes to a person instead of being sent a default (Art, 2026-10-25: "yes, not answered").
-- **Not tested:** Windows (no machine), Intel Mac (runner not set up yet), Apple silicon (no
-  machine), sync against a real github.com repo (needs Art's OK). Nothing about these is known to
-  be broken; they have simply not run since dd77c14.
+- **Sync against real github.com: tested** on the throwaway private repo
+  [JonathanLiu1401/applyqueue-sync-e2e-20261025](https://github.com/JonathanLiu1401/applyqueue-sync-e2e-20261025) (private, verified; Alex Example data and fake portal logins only):
+  bootstrap, push/pull, two devices with concurrent edits, two OS processes racing, conflicts, lock
+  takeover/release, offline then reconnect, a rejected token and a token that cannot see the repo.
+  9/9 passed after **2 bugs were fixed** (a rejected token crashed `/sync/now` with a bare
+  "git clone failed" 500, and the Sync button said "Synced." when a sync was refused; §3, §5).
+- **Not tested:** **Windows: untested** (no real Windows hardware; Art, 2026-10-25: "Leave Windows
+  untested for now"), Intel Mac (runner not set up yet), **Apple silicon: untested** (no machine).
+  Nothing about these is known to be broken; they have simply not run since dd77c14.
 - **Nothing has been published.** The repo stays private; no release, no domain or npm name.
 
 ## Blocked on Art
@@ -27,10 +34,12 @@ Status: **Ready for Art's publish review on Linux; Windows, Intel Mac and Apple 
 | # | What | Why it is blocked | What Art does | What happens next |
 |---|---|---|---|---|
 | 1 | **Intel Mac runner** (hard requirement) | The runner must run on Art's own Intel Mac | Paste the one-command block from [CI_RUNNERS.md](CI_RUNNERS.md#intel-mac-one-command) into Terminal on the Intel Mac (it fetches and runs `scripts/runners/setup-macos-runner.sh`, which registers a runner for this private repo only), then keep the Mac logged in, plugged in, awake and online | We set `gh variable set INTEL_MAC_RUNNER -R JonathanLiu1401/ApplyQueue --body true`, dispatch `ci.yml` with `intel_mac=true` and add the result to §1 |
-| 2 | **Windows** | No Windows machine. Personal and school PCs are never used, and a Windows VM is never run on the shared Grok Bot box (booting one crashed it twice on 2026-10-25) | Choose one: (a) a cloud Windows machine (for example a small Azure/AWS Windows VM, paid by Art), or (b) a Windows VM on the Intel Mac. Then run `scripts/runners/setup-windows-runner.ps1` on it | We dispatch `ci.yml` with `windows=true` (full suite + real app over WebDriver) |
-| 3 | **Apple silicon (arm64)** | No Apple silicon Mac is available | Nothing unless one becomes available; then the same macOS script with `--allow-arm64` | `ci.yml` with `apple_silicon=true` |
-| 4 | Sync against a real github.com repo | Needs a throwaway private repo on Art's account | Say OK to creating `applyqueue-sync-e2e-20261025` (private) | One sync e2e run against it (§7) |
-| 5 | Publish | Only Art approves publishing | Review this report | Nothing is published, made public, or sent upstream until Art says so in his own words |
+| 2 | Publish | Only Art approves publishing | Review this report | Nothing is published, made public, or sent upstream until Art says so in his own words |
+
+Not blocked, just **untested**: **Windows** (no real hardware; Art, 2026-10-25: "Leave Windows untested
+for now". No cloud machine, no VM on the shared box) and **Apple silicon** (no machine). Both stay
+listed in §7. The sync test repo is done (Art, 2026-10-25: "Yes, create the throwaway private repo
+applyqueue-sync-e2e-20261025 for the sync test"; §2).
 
 > **CI moved to self-hosted runners (Art, 2026-10-25: "Don't pay for Actions; set up self-hosted
 > runners instead").** GitHub-hosted runs used up the account's Actions minutes (and earlier were
@@ -60,9 +69,9 @@ selected job to pass. Every job deletes its build output at the end.
 | Runner | Status (2026-10-25 20:25 PDT) |
 |---|---|
 | Linux `applyqueue-box-linux` | **online** (self-hosted on the box, Debian 13; supervised loop as unprivileged `aqrunner`; re-created and re-registered on 2026-10-25 after a box restore dropped the user, the runner and the WebKitGTK/WebDriver packages) |
-| Windows | **none**: Windows is **not tested on real hardware** (last run dd77c14, GitHub-hosted). Reason: no Windows machine is available (personal and school PCs are not to be used; a Windows VM is never run on the shared Grok Bot box, because booting one crashed the box twice on 2026-10-25; Windows coverage waits on a cloud Windows machine or a VM on the Intel Mac). `scripts/runners/setup-windows-runner.ps1` is ready for a future machine |
+| Windows | **none, untested** (Art, 2026-10-25: "Leave Windows untested for now"): Windows is **not tested on real hardware** (last run dd77c14, GitHub-hosted). Reason: no Windows machine is available (personal and school PCs are not to be used; a Windows VM is never run on the shared Grok Bot box, because booting one crashed the box twice on 2026-10-25; Windows coverage waits on a cloud Windows machine or a VM on the Intel Mac). `scripts/runners/setup-windows-runner.ps1` is ready for a future machine |
 | Intel Mac | **waiting** for Art to run the one-liner from CI_RUNNERS.md (`scripts/runners/setup-macos-runner.sh`) |
-| Apple silicon | **blocked**: no Apple silicon Mac available (same script with `--allow-arm64`) |
+| Apple silicon | **untested**: no Apple silicon Mac available (same script with `--allow-arm64`) |
 
 Full run once runners are online:
 
@@ -96,6 +105,7 @@ and (b) the launch/health smoke of the real `.app` bundle.
 | Gmail + Outlook link, revoke → "Reconnect needed" → re-auth | `test_mail_link_and_reauth[gmail/outlook]`, `test_mail.py` (26), `test_mail_breakit_m8.py` (18) | PKCE, one-time state, invalid_grant, day-6 re-auth, OTP + verify links |
 | Full Outlook path: Workday email code read from linked Outlook | `tests/e2e/test_agent_apply_e2e.py::test_workday_email_code_through_linked_outlook` | |
 | Sync: device flow, private repo creation, sync to a local bare remote, **public repo refused** | `test_sync_sign_in_private_repo_and_public_refused`, `test_sync.py` (25), `test_sync_breakit_m8.py` (7) | lock contention, lock race lost on push, stale lock, offline queue + resync, first run offline, LWW/union merge across 2 devices, duplicate job keys (tracking params), token guard |
+| **Sync against real github.com** (private throwaway repo [applyqueue-sync-e2e-20261025](https://github.com/JonathanLiu1401/applyqueue-sync-e2e-20261025), created `--private` and verified `private: true` before any write; kept, not deleted) | `tests/e2e/test_sync_real_github_e2e.py` (9; skipped unless `APPLYQUEUE_SYNC_E2E_REPO` and `APPLYQUEUE_SYNC_E2E_TOKEN` are set; the token comes from the environment and is never written to the repo or logs) | 2026-10-25 PDT, **9/9 passed**: repo private + the app repo refused (pass); bootstrap of the **empty** repo, push, second device clones and pulls (pass); concurrent edits on 2 devices, github.com rejects the second push, merge + retry (pass); credential conflict on the same portal, newer wins, other logins merged (pass); job lock contention, named lock heartbeat, takeover after timeout, old holder refused, release; job lock released after finishing (pass); offline (proxy to a closed port) then reconnect, queued change pushed (pass); rejected token: clear message, nothing pushed (**failed first, fixed**); valid token pointed at a repo it cannot see: refused, nothing created (pass); 2 OS processes with separate data dirs race for 4 jobs, each claimed exactly once (pass); token never in the repo history (pass) |
 | Schedules | `test_search_schedule.py` (37), `test_schedule_breakit_m8.py` (5) | overlap skip, other device holds lock, sleep catch-up runs once, clock moved back, 429 backoff, expired login pauses with notice, repeated errors pause, heartbeat on long runs, merged multi-device schedule list |
 | Real apply flows: Workday / Greenhouse / Lever / Ashby / iCIMS-style mock ATS (multi-page, conditional, uploads, essays, EEO) | `tests/e2e/test_agent_apply_e2e.py`, `test_mock_ats_forms.py` | the real browser_use Agent + real Chromium + scripted LLM. Every optional question must be answered truthfully, and finish needs page proof. Captcha, unanswerable question, missing confirmation and a 500 on submit all go to a person and are never "success" |
 | Backends | `test_cli_backends.py`, `test_local_models.py`, `test_llm_factory.py` | fake Grok/Cursor/Codex/Claude CLIs (unmodified-CLI contract, no token files read); mocked APIs |
@@ -121,6 +131,7 @@ and (b) the launch/health smoke of the real `.app` bundle.
 | Concurrent instances / multi-device | sync + schedule tests above | |
 | Non-ASCII paths with spaces | all UI/sidecar e2e use `Alex Example ü dätä dir`-style data dirs and résumé names | |
 | Expired tokens | mail invalid_grant / revoke, sync device flow denied, schedule expired-login pause | |
+| **Sync token rejected / no access** (revoked, expired, unlinked, read-only, no access to the repo) | real github.com e2e `test_token_without_access_is_refused_cleanly`, `test_token_that_cannot_see_the_repo_is_refused`; `test_sync.py` auth tests (10) | **bugs fixed** (e6b3d89): on github.com a refused token made git fail with "Authentication failed" / "could not read Username" / "Repository not found", which was an unclassified error, so `/sync/now` returned **HTTP 500 "git clone failed"** and the REST 401 from the privacy check escaped too. Now git auth failures are their own error (never mistaken for offline), the sync returns `ok: false` with "GitHub refused the token for owner/repo ... Link GitHub again." (or "cannot push" / "not linked"), job changes stay queued, Settings shows a "Sync paused" banner until a sync works, and "Sync now" no longer says "Synced." when the sync was refused |
 | **Prompt injection, obeyed by the model** (page text tells the AI to open `/collect?data=<email>,<password>` and click Submit; visible, `display:none` and white 1px copies) | `tests/e2e/test_agent_hostile_pages.py::test_prompt_injection_obeyed_by_the_model_still_cannot_submit_blind_or_leak` | **bug fixed** (87f5b29): a model that followed the page **leaked the candidate's email to the attacker URL**. browser_use replaces `<secret>` placeholders in every action, including `navigate`. `navigate`/`go_to_url`/`search` now refuse any URL that contains the email or phone, even URL-encoded once, twice or three times, or copied as a literal (unit test with 7 cases). The password never reached the URL: it is not in `sensitive_data` and is typed only by `fill_site_password`. The blind Submit (both `submit_form_guarded` and a plain `click`) was refused because of unanswered questions. 0 submissions, never "success" |
 | Prompt injection + **honeypot field** with a normal model | `test_prompt_injection_and_honeypot_with_a_normal_model` | **bug fixed** (87f5b29): an off-screen "Leave this field blank" input counted as an unanswered question, so a normal application ended as `needs_human`. The form scan now ignores honeypots (off-screen, inside `aria-hidden`, opacity 0 with no tab stop, or "leave blank" / "do not fill" labels). It submits, and the honeypot stays empty (the mock records any value) |
 | Injection on a Workday-style account page | `test_injected_account_page_never_shows_the_site_password_to_the_model` | the site password never appears in any LLM prompt; submits normally (same honeypot fix) |
@@ -212,6 +223,7 @@ and (b) the launch/health smoke of the real `.app` bundle.
 | 9aa9448 | email: `invalid_grant` mid-run fails fast with re-auth, pauses the schedule with a mailbox notice; used OTP not reused; same-company ties left for review; word-boundary company matching |
 | ff49fe2 | agent forms: real dates in date pickers (notice period → date, placeholder formats); multi-answer checkbox groups; session-expired pages and login redirects are never confirmations |
 | 45f16cb | M9 break-it: third-party form questions never get the candidate's details; no "+1+1" phone; per-skill years, citizenship, country code, open-source essay and untouched 0 years answered truthfully; actionable messages for malformed résumé files; robust LLM résumé-reply parsing with type coercion; no 500s or poisoned settings from wrong-typed request bodies; profile/settings repaired on load; a rejected model API key stops the run and keeps jobs pending |
+| e6b3d89 | sync with a token GitHub refuses (found on real github.com): git auth errors classified (not offline, not a bare 500); `ok: false` + actionable `auth_error`, shown in Settings; "Sync now" reports refusals instead of "Synced."; real github.com e2e (env-gated) |
 | df69d6e | untouched profile presets (sponsorship, relocation, salary, work mode, years, languages, country, phone code) are stored as "not answered"; old profiles migrated (values equal to the old preset kept but flagged "Please confirm" and withheld from applications); Profile page, setup wizard and Dashboard flag unanswered fields; a form asking an unanswered preference goes to needs-human, never a preset |
 
 ## 6. Known limitations
@@ -219,7 +231,8 @@ and (b) the launch/health smoke of the real `.app` bundle.
 - Cross-origin iframes in ATS pages are not scanned by the form guard (typing personal data into them is refused unless the iframe's origin is allowed).
 - `evaluate`/`send_keys` paths could still trigger a submit that the guard does not see.
 - Agent e2e uses a scripted LLM stand-in. Real-model quality is measured only by the Ollama run above.
-- Sync e2e uses a local bare git repo instead of github.com, and repo visibility is checked only before a push (pulls from a public repo are harmless, and creds are only written on push).
+- The default suite syncs with a local bare git repo; the github.com run is opt-in (env vars) and does not run in CI, because CI never gets a real token. Repo visibility is checked only before a push (pulls from a public repo are harmless, and creds are only written on push).
+- The "no access" case was tested with the owner's token against a repo it cannot see (GitHub answers 404 for both). A second GitHub account with read-only access was not available, so the read-only path ("cannot push") is covered only by the mock test.
 - macOS: no WebDriver for WKWebView, so the real webview is not driven there, only launched and health-checked.
 - Personal data may be typed only on the job's own origins. An employer whose application lives on an ATS domain ApplyQueue does not know (not the job's domain, not in the built-in ATS list) needs that domain added (`apply_domains` on the job, or `APPLYQUEUE_APPLY_DOMAINS`); otherwise the run is refused and goes to a person. There is no Settings UI for this yet.
 - A hostile page on the **same** origin as the application (for example an injected "verify your identity" step on the real ATS) is not distinguished from the real form; the URL guard and the form guards still apply there.
@@ -235,8 +248,8 @@ and (b) the launch/health smoke of the real `.app` bundle.
 
 ## 7. Not tested yet (honest)
 
-- **CI on anything but Linux since dd77c14.** Linux is green on the self-hosted box runner (47a63fe = ff49fe2 code: [40252747851](https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/40252747851), including the real Tauri app; M9 code 45f16cb: [40264078819](https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/40264078819), 2026-10-25 8:26–8:38 PM PDT, 1095 passed). **Windows: not tested on real hardware since dd77c14** (no Windows machine is available (personal and school PCs are not to be used; a Windows VM is never run on the shared Grok Bot box, because booting one crashed the box twice on 2026-10-25; Windows coverage waits on a cloud Windows machine or a VM on the Intel Mac)); **Intel Mac waits for Art to run the macOS one-liner**.
-- Apple-silicon arm64 run in M8: **blocked until an Apple silicon Mac is available** as a runner.
+- **CI on anything but Linux since dd77c14.** Linux is green on the self-hosted box runner (47a63fe = ff49fe2 code: [40252747851](https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/40252747851), including the real Tauri app; M9 code 45f16cb: [40264078819](https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/40264078819), 2026-10-25 8:26–8:38 PM PDT, 1095 passed). **Windows: untested** (Art: "Leave Windows untested for now"; not run on real hardware since dd77c14; no Windows machine is available (personal and school PCs are not to be used; a Windows VM is never run on the shared Grok Bot box, because booting one crashed the box twice on 2026-10-25; Windows coverage waits on a cloud Windows machine or a VM on the Intel Mac)); **Intel Mac waits for Art to run the macOS one-liner**.
+- Apple-silicon arm64: **untested** (no Apple silicon Mac available).
 - Real Tauri app over WebDriver on Windows: job written in dd77c14, now in `ci.yml` (`windows` input; `msedgedriver-tool` + tauri-driver, `continue-on-error` until proven), never run: no Windows machine available.
-- Sync against a real github.com repo: needs Art's OK to create a throwaway private repo on his account (proposed: `applyqueue-sync-e2e-20261025`, created `--private`, visibility re-checked as PRIVATE before any write, deleted afterwards only if `gh` has the `delete_repo` scope, otherwise left private and listed here). Not done.
+- Sync against a real github.com repo: **done** (see §2). The throwaway repo https://github.com/JonathanLiu1401/applyqueue-sync-e2e-20261025 stays in place, private, until Art says to delete it.
 - Real Gmail/Outlook/GitHub accounts (by design: mocks only).

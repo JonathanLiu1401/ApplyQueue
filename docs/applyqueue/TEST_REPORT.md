@@ -1,6 +1,6 @@
 # ApplyQueue M8 test report (e2e + break-it)
 
-Status: **Ready for Art's publish review on Linux; Windows, Intel Mac and Apple silicon are blocked on Art (see "Blocked on Art")**. Last update: 2026-10-25 21:30 PDT (code at 45f16cb + "not answered" profile state, §5 last row; CI on self-hosted runners only).
+Status: **Ready for Art's publish review on Linux; Windows, Intel Mac and Apple silicon are blocked on Art (see "Blocked on Art")**. Last update: 2026-10-25 21:45 PDT (code at df69d6e; CI on self-hosted runners only).
 
 ## Summary
 
@@ -8,7 +8,8 @@ Status: **Ready for Art's publish review on Linux; Windows, Intel Mac and Apple 
   (tsc, eslint, vitest, full pytest incl. agent e2e on 5 mock ATS styles and the break-it suite,
   packaged sidecar + UI e2e) **and** for the real Tauri app over WebDriver plus the .deb bundle
   ([40252747851](https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/40252747851), code = ff49fe2;
-  M9 code 45f16cb: [40264078819](https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/40264078819), 1095 pytest passed).
+  M9 code 45f16cb: [40264078819](https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/40264078819), 1095 pytest passed;
+  "not answered" code df69d6e: [40269230062](https://github.com/JonathanLiu1401/ApplyQueue/actions/runs/40269230062), 1126 pytest and 530 vitest passed).
 - **Break-it:** M8 covered corrupt files, crashes, second instances, disk full, prompt injection,
   hostile pages, sync races, DST, mail token expiry and multi-step forms. M9 (§3, last rows)
   added malformed résumé PDFs, sloppy LLM replies, wrong-typed request bodies and settings,
@@ -211,6 +212,7 @@ and (b) the launch/health smoke of the real `.app` bundle.
 | 9aa9448 | email: `invalid_grant` mid-run fails fast with re-auth, pauses the schedule with a mailbox notice; used OTP not reused; same-company ties left for review; word-boundary company matching |
 | ff49fe2 | agent forms: real dates in date pickers (notice period → date, placeholder formats); multi-answer checkbox groups; session-expired pages and login redirects are never confirmations |
 | 45f16cb | M9 break-it: third-party form questions never get the candidate's details; no "+1+1" phone; per-skill years, citizenship, country code, open-source essay and untouched 0 years answered truthfully; actionable messages for malformed résumé files; robust LLM résumé-reply parsing with type coercion; no 500s or poisoned settings from wrong-typed request bodies; profile/settings repaired on load; a rejected model API key stops the run and keeps jobs pending |
+| df69d6e | untouched profile presets (sponsorship, relocation, salary, work mode, years, languages, country, phone code) are stored as "not answered"; old profiles migrated (values equal to the old preset kept but flagged "Please confirm" and withheld from applications); Profile page, setup wizard and Dashboard flag unanswered fields; a form asking an unanswered preference goes to needs-human, never a preset |
 
 ## 6. Known limitations
 

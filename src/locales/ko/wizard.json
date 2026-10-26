@@ -50,7 +50,9 @@
     "reviewEdit": "검토 및 수정",
     "goToProfile": "프로필로 이동",
     "autoFilledHint": "희망 직종과 희망 근무지를 확인하세요 — 채용 수집 검색을 결정합니다.",
-    "autoFilledLabel": "자동 입력 완료!"
+    "autoFilledLabel": "자동 입력 완료!",
+    "unansweredTitle": "{{count}} profile answers are not given yet",
+    "unansweredHint": "ApplyQueue never submits a default for these. Jobs whose forms ask them wait for you until you answer them on the Profile page."
   },
   "readyStep": {
     "heading": "모든 준비가 완료되었습니다!",
@@ -61,7 +63,9 @@
     "resume": "이력서",
     "profile": "프로필",
     "collectJobs": "채용 수집",
-    "viewGuide": "가이드 보기"
+    "viewGuide": "가이드 보기",
+    "profileAnswers": "Profile answers",
+    "profileAnswersMissing": "Profile answers: {{count}} not given"
   },
   "nav": {
     "back": "뒤로",

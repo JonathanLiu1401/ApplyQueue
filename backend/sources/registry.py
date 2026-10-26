@@ -123,7 +123,7 @@ def _format_profile(profile: dict) -> str:
     if profile.get("email"):
         parts.append(f"Email: {profile['email']}")
     if profile.get("phone"):
-        parts.append(f"Phone: {profile.get('phone_country_code', '')}{profile['phone']}")
+        parts.append(f"Phone: {profile.get('phone_country_code') or ''}{profile['phone']}")
     addr = profile.get("address", {})
     if addr.get("city"):
         parts.append(f"Location: {addr['city']}, {addr.get('state', '')} {addr.get('zip', '')} {addr.get('country', '')}")
@@ -140,10 +140,13 @@ def _format_profile(profile: dict) -> str:
         parts.append(f"Education: {edu['degree']} from {edu.get('school', '')} ({edu.get('graduation', '')})")
     if profile.get("skills"):
         parts.append(f"Skills: {', '.join(profile['skills'])}")
-    sal = profile.get("salary_expectation", {})
-    if sal.get("min"):
-        period = sal.get("period", "annual")
-        parts.append(f"Salary: {sal['currency']} {sal['min']:,}-{sal['max']:,} ({period})")
+    sal = profile.get("salary_expectation") or {}
+    if isinstance(sal, dict) and sal.get("min"):
+        period = sal.get("period") or "annual"
+        lo, hi = sal["min"], sal.get("max")
+        fmt = lambda n: f"{n:,}" if isinstance(n, (int, float)) and not isinstance(n, bool) else str(n)
+        rng = f"{fmt(lo)}-{fmt(hi)}" if hi else f"{fmt(lo)}+"
+        parts.append(f"Salary: {sal.get('currency') or ''} {rng} ({period})".replace("  ", " "))
     return "\n".join(parts)
 
 

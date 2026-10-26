@@ -50,7 +50,9 @@
     "reviewEdit": "確認・編集",
     "goToProfile": "プロフィールへ",
     "autoFilledHint": "希望職種と希望勤務地を確認してください — これらが求人収集の検索条件になります。",
-    "autoFilledLabel": "自動入力完了！"
+    "autoFilledLabel": "自動入力完了！",
+    "unansweredTitle": "{{count}} profile answers are not given yet",
+    "unansweredHint": "ApplyQueue never submits a default for these. Jobs whose forms ask them wait for you until you answer them on the Profile page."
   },
   "readyStep": {
     "heading": "準備完了！",
@@ -61,7 +63,9 @@
     "resume": "履歴書",
     "profile": "プロフィール",
     "collectJobs": "求人を収集",
-    "viewGuide": "ガイドを見る"
+    "viewGuide": "ガイドを見る",
+    "profileAnswers": "Profile answers",
+    "profileAnswersMissing": "Profile answers: {{count}} not given"
   },
   "nav": {
     "back": "戻る",

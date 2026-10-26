@@ -510,7 +510,87 @@ def _profile_answer(label: str, profile: dict, context: dict) -> str | None:
             return None
         if _s(value):
             return _s(value)
+        if rule in _TERMINAL_RULES:
+            # "Will you need sponsorship to work in this country?" with sponsorship not answered must
+            # not fall through to the "country" rule: no answer here means a person answers it.
+            return None
     return None
+
+
+# Rules whose question no later rule may answer when the profile has no value for it.
+_TERMINAL_RULES = {"sponsor", "relocate", "salary", "auth"}
+
+# Questions only the candidate can answer (not derivable from the résumé). When the profile field
+# is unset (see profile_presets) and the answer bank has nothing, the form goes to a person.
+PREFERENCE_QUESTIONS: list[tuple[str, str, re.Pattern]] = [
+    ("visa_sponsorship_needed", "Visa sponsorship", re.compile(
+        r"\bsponsorship\b|\b(visa|immigration|h-?1b)\b.*\bsponsor|\bsponsor\w*\b.*\b(visa|immigration|h-?1b|"
+        r"work permit|employment|status)\b|\b(require|need)\w*\b.*\bsponsor", re.I)),
+    ("willing_to_relocate", "Willingness to relocate", re.compile(r"\brelocat", re.I)),
+    ("salary_expectation.min", "Salary expectation", re.compile(
+        r"\b(salary|compensation|pay) (expectation|requirement|range)s?\b|\b(desired|expected|target) (annual |base )?"
+        r"(salary|pay|compensation)\b|\bsalary\b.*\b(expect|desire|looking for|require)", re.I)),
+    ("preferred_work_mode", "Preferred work mode (remote / hybrid / on-site)", re.compile(
+        r"\bwork(ing)? (mode|arrangement|model|setting|style|location type)\b|\bpreferred (work(ing)? )?"
+        r"(mode|arrangement|model|setting|location type)\b|\b(remote|hybrid|on-?site|in-office)\b.*\b(remote|hybrid|"
+        r"on-?site|in-office)\b|\b(open|willing|able|comfortable) to work(ing)? (remotely|on-?site|in (the |an |our )?"
+        r"office|hybrid)", re.I)),
+]
+
+
+def apply_profile(profile: dict) -> dict:
+    """The profile without unset / unconfirmed preset answers (profile_presets.for_apply)."""
+    try:
+        from core.profile_presets import for_apply
+    except ImportError:  # pragma: no cover
+        from backend.core.profile_presets import for_apply
+    return for_apply(profile)
+
+
+def _pref_unset(profile: dict, key: str) -> bool:
+    cur: Any = _d(profile)
+    for part in key.split("."):
+        cur = cur.get(part) if isinstance(cur, dict) else None
+    if key == "salary_expectation.min" and not _s(cur):
+        return True
+    if isinstance(cur, bool):
+        return False
+    return not _s(cur)
+
+
+def unanswered_preference(label: str, profile: dict, qa: dict | None = None) -> tuple[str, str] | None:
+    """(profile field, question name) when ``label`` asks a preference the candidate never answered
+    and the answer bank has nothing for it; else None. Such a question is never answered by
+    ApplyQueue: no preset, no guess (untouched defaults are "not answered")."""
+    if not _s(label):
+        return None
+    l = normalize(label)
+    for key, name, rx in PREFERENCE_QUESTIONS:
+        if rx.search(l):
+            if not _pref_unset(profile, key):
+                return None  # the candidate answered it: the normal rules use that answer
+            if answer_bank_lookup(label, qa or {}) is not None:
+                return None  # the candidate saved an answer for this question
+            return key, name
+    return None
+
+
+def preference_gate(fields: list["Field"], profile: dict, qa: dict | None = None) -> list[dict]:
+    """Fields (filled or not) asking a preference the candidate never answered. A form showing any
+    of these must not be submitted: a pre-filled or agent-typed value would be an invented answer."""
+    out = []
+    for f in fields:
+        if classify(f) in ("eeo", "resume", "file"):
+            continue
+        hit = unanswered_preference(f.label, profile, qa)
+        if hit:
+            out.append({**f.brief(), "profile_field": hit[0], "question": hit[1]})
+    return out
+
+
+def preference_reason(question: str) -> str:
+    return (f"Not answered in your profile: {question}. ApplyQueue never submits a default or a guess; "
+            f"answer it on the Profile page (or save an answer for this question), then retry this job.")
 
 
 def pick_decline_option(options: list[dict]) -> str | None:
@@ -707,7 +787,11 @@ async def autofill(evaluate: Evaluate, profile: dict, qa: dict, context: dict | 
     """
     fields = await scan(evaluate)
     filled, failed, remaining = [], [], []
+    needs_profile = preference_gate(fields, profile, qa)
+    gated = {b["key"] for b in needs_profile}
     for f in unanswered(fields):
+        if f.key in gated:
+            continue  # only the candidate can answer it: never composed, never guessed
         value = plan_answer(f, profile, qa, context)
         if value is None and compose is not None:
             value = await compose(f)
@@ -716,4 +800,4 @@ async def autofill(evaluate: Evaluate, profile: dict, qa: dict, context: dict | 
             continue
         res = await fill_field(evaluate, f, value)
         (filled if res.ok else failed).append({**f.brief(), "strategy": res.strategy, "attempts": res.attempts})
-    return {"filled": filled, "failed": failed, "remaining": remaining}
+    return {"filled": filled, "failed": failed, "remaining": remaining, "needs_profile": needs_profile}

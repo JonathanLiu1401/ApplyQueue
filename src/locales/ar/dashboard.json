@@ -25,7 +25,10 @@
     "setUp": "إعداد",
     "configureAI": "تكوين مزود AI",
     "setResume": "تعيين مسار السيرة الذاتية",
-    "setupProfile": "إعداد ملفك الشخصي"
+    "setupProfile": "إعداد ملفك الشخصي",
+    "profileUnanswered": "{{count}} profile answers are not given yet",
+    "profileUnansweredHint": "ApplyQueue never submits a default for these: jobs whose forms ask them wait for you (Needs a person).",
+    "answerNow": "Answer on the Profile page"
   },
   "chromium": {
     "installing": "جارٍ تثبيت متصفح Chromium",

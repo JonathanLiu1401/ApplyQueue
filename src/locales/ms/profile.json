@@ -83,5 +83,18 @@
   "notes": {
     "title": "Nota",
     "placeholder": "Sebarang arahan khas untuk ejen AI..."
+  },
+  "unanswered": {
+    "title": "Some answers are not given yet",
+    "body": "ApplyQueue never fills in a default or a guess for these. A job whose form asks one waits for you (Needs a person) until you answer it here.",
+    "badge": "Needs your answer",
+    "confirmBadge": "Please confirm",
+    "blocksApply": "asked by many application forms",
+    "confirmBody": "Values marked \"Please confirm\" were kept from an older version of ApplyQueue and match its old preset defaults, so they may not be your real answers. They are not used in applications until you confirm or change them.",
+    "confirmButton": "These are my answers",
+    "notAnswered": "Not answered",
+    "yes": "Yes",
+    "no": "No",
+    "phoneCode": "Phone country code"
   }
 }

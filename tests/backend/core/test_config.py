@@ -102,22 +102,26 @@ def test_save_json_permission_failure_is_swallowed(tmp_path, monkeypatch):
 # ── Profile ──────────────────────────────────────────────────────────────────
 
 def test_load_profile_defaults(data_dir):
-    """A fresh profile returns the documented default skeleton."""
+    """A fresh profile returns the documented default skeleton: preset answers are "not answered"."""
     profile = config.load_profile()
     assert profile["name"] == ""
-    assert profile["phone_country_code"] == "+1"
-    assert profile["country"] == "US"
-    assert profile["address"]["country"] == "USA"
-    assert profile["salary_expectation"]["currency"] == "USD"
-    assert profile["languages"] == ["English"]
-    assert profile["visa_sponsorship_needed"] is False
+    assert profile["phone_country_code"] == ""
+    assert profile["country"] == ""
+    assert profile["address"]["country"] == ""
+    assert profile["salary_expectation"]["currency"] == "USD"  # a unit, not an answer
+    assert profile["salary_expectation"]["min"] is None and profile["salary_expectation"]["max"] is None
+    assert profile["languages"] == []
+    assert profile["visa_sponsorship_needed"] is None
+    assert profile["willing_to_relocate"] is None
+    assert profile["preferred_work_mode"] == ""
+    assert profile["years_of_experience"] is None
 
 
 def test_save_and_load_profile_roundtrip(data_dir):
     """A saved profile is read back identically."""
     custom = {"name": "Ada Lovelace", "email": "ada@example.com", "skills": ["math"]}
     config.save_profile(custom)
-    assert config.load_profile() == custom
+    assert config.load_profile() == {**custom, "_schema": 2}
     assert (data_dir / "candidate_profile.json").exists()
 
 

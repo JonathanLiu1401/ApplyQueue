@@ -50,7 +50,9 @@
     "reviewEdit": "Bekijken & bewerken",
     "goToProfile": "Ga naar profiel",
     "autoFilledHint": "Controleer Gewenste functies en Gewenste locaties — deze sturen de zoekresultaten.",
-    "autoFilledLabel": "Automatisch ingevuld!"
+    "autoFilledLabel": "Automatisch ingevuld!",
+    "unansweredTitle": "{{count}} profile answers are not given yet",
+    "unansweredHint": "ApplyQueue never submits a default for these. Jobs whose forms ask them wait for you until you answer them on the Profile page."
   },
   "readyStep": {
     "heading": "Alles is gereed!",
@@ -61,7 +63,9 @@
     "resume": "CV",
     "profile": "Profiel",
     "collectJobs": "Banen verzamelen",
-    "viewGuide": "Handleiding bekijken"
+    "viewGuide": "Handleiding bekijken",
+    "profileAnswers": "Profile answers",
+    "profileAnswersMissing": "Profile answers: {{count}} not given"
   },
   "nav": {
     "back": "Terug",

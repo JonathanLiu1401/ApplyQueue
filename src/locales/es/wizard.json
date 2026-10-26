@@ -50,7 +50,9 @@
     "reviewEdit": "Revisar y editar",
     "goToProfile": "Ir al perfil",
     "autoFilledHint": "Revisa Puestos buscados y Ubicaciones deseadas — estos dirigen la búsqueda de empleos.",
-    "autoFilledLabel": "¡Autocompletado!"
+    "autoFilledLabel": "¡Autocompletado!",
+    "unansweredTitle": "{{count}} profile answers are not given yet",
+    "unansweredHint": "ApplyQueue never submits a default for these. Jobs whose forms ask them wait for you until you answer them on the Profile page."
   },
   "readyStep": {
     "heading": "¡Todo listo!",
@@ -61,7 +63,9 @@
     "resume": "Currículum",
     "profile": "Perfil",
     "collectJobs": "Recopilar empleos",
-    "viewGuide": "Ver guía"
+    "viewGuide": "Ver guía",
+    "profileAnswers": "Profile answers",
+    "profileAnswersMissing": "Profile answers: {{count}} not given"
   },
   "nav": {
     "back": "Atrás",

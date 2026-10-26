@@ -113,3 +113,16 @@ async def test_impossible_field_becomes_needs_human_not_blank(page):
                          unanswered=[f.brief() for f in left])
     assert out.status == js.NEEDS_HUMAN and "security clearance" in out.reason.lower()
     assert await page.locator("#submit").count() == 1  # never submitted
+
+
+async def test_unanswered_sponsorship_is_left_for_the_user_not_defaulted(page):
+    # Rule: an untouched preset is "not answered". Autofill must not pick Yes or No.
+    await page.goto(FORM.as_uri())
+    ev = evaluator(page)
+    profile = {k: v for k, v in PROFILE.items() if k != "visa_sponsorship_needed"}
+    profile["_schema"] = 2
+    result = await fg.autofill(ev, fg.apply_profile(profile), QA, {"source": "LinkedIn"}, compose=compose)
+    assert [g["profile_field"] for g in result["needs_profile"]] == ["visa_sponsorship_needed"]
+    by_name = {f.name: f for f in await fg.scan(ev)}
+    assert not by_name["sponsor"].value
+    assert fg.preference_gate(list(by_name.values()), fg.apply_profile(profile), QA)  # submit refused

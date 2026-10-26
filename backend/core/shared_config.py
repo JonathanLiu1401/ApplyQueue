@@ -113,6 +113,17 @@ def get_memory_store() -> MemoryStore:
     return _memory_store
 
 
+def load_apply_profile(path: Path | None = None) -> dict:
+    """The candidate profile as the apply engine may use it: answers the user never gave (or kept
+    from an old profile without confirming) are left out, so no preset is ever typed into a form."""
+    try:
+        from core.profile_presets import for_apply
+    except ImportError:  # pragma: no cover
+        from backend.core.profile_presets import for_apply
+    raw = load_json(path or CANDIDATE_PROFILE, {})
+    return for_apply(raw if isinstance(raw, dict) else {})
+
+
 def load_json(path: Path, default=None):
     try:
         from core.config import read_json_file
@@ -231,7 +242,7 @@ def build_memory_context(
     if sal_min:
         salary_str = f"{sal_currency} {_num(sal_min)}" + (f"-{_num(sal_max)}" if sal_max else "") + f" ({sal_period})"
     else:
-        salary_str = "Not specified"
+        salary_str = "Not specified (not answered by the candidate)"
 
     # Country-aware date format
     date_format = profile.get('date_format', '') or 'MM/DD/YYYY'
@@ -244,15 +255,17 @@ def build_memory_context(
     edu_text = " from ".join(x for x in (edu.get('degree'), edu.get('school')) if x)
     if edu_text and edu.get('graduation'):
         edu_text += f" ({edu['graduation']})"
+    def _yn(v):
+        if isinstance(v, bool):
+            return "Yes" if v else "No"
+        return v
+
     candidates = [
         ("Name", profile.get('name')),
         ("Email", profile.get('email')),
         ("Phone", phone),
         ("Location", location),
         ("Work Authorization", profile.get('work_authorization')),
-        ("Visa Sponsorship Needed", profile.get('visa_sponsorship_needed')),
-        ("Willing to Relocate", profile.get('willing_to_relocate')),
-        ("Preferred Work Mode", profile.get('preferred_work_mode')),
         ("Years of Experience", profile.get('years_of_experience')),
         ("Education", edu_text),
         ("Current Role", profile.get('current_role')),
@@ -261,11 +274,23 @@ def build_memory_context(
         ("Languages", ", ".join(_l(profile.get('languages')))),
         ("Skills", ", ".join(_l(profile.get('skills')))),
     ]
-    profile_lines = ["CANDIDATE PROFILE:"] + [f"{k}: {v}" for k, v in candidates if v not in (None, "")]
+    # Only the candidate can answer these; an untouched one is "not answered", never a default.
+    preferences = [
+        ("Visa Sponsorship Needed", _yn(profile.get('visa_sponsorship_needed'))),
+        ("Willing to Relocate", _yn(profile.get('willing_to_relocate'))),
+        ("Preferred Work Mode", profile.get('preferred_work_mode')),
+    ]
+    profile_lines = ["CANDIDATE PROFILE:"] + [f"{k}: {v}" for k, v in candidates + preferences if v not in (None, "")]
     profile_lines.append(f"Salary: {salary_str}")
     missing = [k for k, v in candidates if v in (None, "")]
     if missing:
         profile_lines.append("Not in the profile (answer only from the resume, never invent): " + ", ".join(missing))
+    unanswered = [k for k, v in preferences if v in (None, "")] + ([] if sal_min else ["Salary Expectation"])
+    if unanswered:
+        profile_lines.append(
+            "NOT ANSWERED by the candidate (no default exists; never guess, never derive from the resume): "
+            + ", ".join(unanswered) + ". If a form asks any of these, call report_needs_human for that question "
+            "and do not submit: the user answers it in their profile first.")
     if profile.get('notice_period'):
         profile_lines.append(f"Notice Period: {profile['notice_period']}")
     if profile.get('nationality'):

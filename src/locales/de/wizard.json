@@ -50,7 +50,9 @@
     "reviewEdit": "Überprüfen & Bearbeiten",
     "goToProfile": "Zum Profil",
     "autoFilledHint": "Prüfen Sie Gesuchte Positionen und Gewünschte Standorte — diese steuern die Jobsuche.",
-    "autoFilledLabel": "Automatisch ausgefüllt!"
+    "autoFilledLabel": "Automatisch ausgefüllt!",
+    "unansweredTitle": "{{count}} profile answers are not given yet",
+    "unansweredHint": "ApplyQueue never submits a default for these. Jobs whose forms ask them wait for you until you answer them on the Profile page."
   },
   "readyStep": {
     "heading": "Alles bereit!",
@@ -61,7 +63,9 @@
     "resume": "Lebenslauf",
     "profile": "Profil",
     "collectJobs": "Jobs sammeln",
-    "viewGuide": "Anleitung ansehen"
+    "viewGuide": "Anleitung ansehen",
+    "profileAnswers": "Profile answers",
+    "profileAnswersMissing": "Profile answers: {{count}} not given"
   },
   "nav": {
     "back": "Zurück",

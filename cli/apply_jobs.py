@@ -26,7 +26,7 @@ try:
         BASE_DIR, BROWSER_PROFILE_DIR,
         JOBS_FILE, QA_FILE, CANDIDATE_PROFILE, LOGS_DIR, RESUME_PATH, SENSITIVE_DATA, BLOCKED_DOMAINS,
         AWS_PROFILE, AWS_REGION, MODEL_ID,
-        load_json, save_json, refresh_credentials, credential_refresh_loop,
+        load_json, load_apply_profile, save_json, refresh_credentials, credential_refresh_loop,
         build_memory_context, extract_from_history, normalize_question,
         read_jobs, claim_job, update_job, get_memory_store,
     )
@@ -44,7 +44,7 @@ except ImportError:
         BASE_DIR, BROWSER_PROFILE_DIR,
         JOBS_FILE, QA_FILE, CANDIDATE_PROFILE, LOGS_DIR, RESUME_PATH, SENSITIVE_DATA, BLOCKED_DOMAINS,
         AWS_PROFILE, AWS_REGION, MODEL_ID,
-        load_json, save_json, refresh_credentials, credential_refresh_loop,
+        load_json, load_apply_profile, save_json, refresh_credentials, credential_refresh_loop,
         build_memory_context, extract_from_history, normalize_question,
         read_jobs, claim_job, update_job, get_memory_store,
     )
@@ -571,7 +571,7 @@ async def main():
     args = parser.parse_args()
 
     jobs = load_json(JOBS_FILE, {})
-    profile = load_json(CANDIDATE_PROFILE, {})
+    profile = load_apply_profile()
     qa = load_json(QA_FILE, {})
     LOGS_DIR.mkdir(exist_ok=True)
 

@@ -186,28 +186,39 @@ def _profile_defaults() -> dict:
         "name": "",
         "email": "",
         "phone": "",
-        "phone_country_code": "+1",
-        "country": "US",
-        "address": {"street": "", "city": "", "state": "", "zip": "", "country": "USA"},
+        # Preset answers start "not answered" (see profile_presets): None / "" / [] until the user
+        # gives one, so an untouched field is never mistaken for a choice.
+        "phone_country_code": "",
+        "country": "",
+        "address": {"street": "", "city": "", "state": "", "zip": "", "country": ""},
         "work_authorization": "",
-        "visa_sponsorship_needed": False,
-        "willing_to_relocate": False,
-        "preferred_work_mode": "hybrid",
-        "years_of_experience": 0,
+        "visa_sponsorship_needed": None,
+        "willing_to_relocate": None,
+        "preferred_work_mode": "",
+        "years_of_experience": None,
         "education": {"degree": "", "school": "", "graduation": ""},
         "current_role": "",
         "target_job_titles": [],
         "target_locations": [],
-        "languages": ["English"],
+        "languages": [],
         "skills": [],
-        "salary_expectation": {"min": 50000, "max": 100000, "currency": "USD", "period": "annual"},
+        "salary_expectation": {"min": None, "max": None, "currency": "USD", "period": "annual"},
         "notice_period": "",
         "nationality": "",
         "date_of_birth": "",
         "cover_letter": "",
         "date_format": "MM/DD/YYYY",
         "notes": "",
+        "_schema": _presets().SCHEMA,
     }
+
+
+def _presets():
+    try:
+        from core import profile_presets
+    except ImportError:  # pragma: no cover
+        from backend.core import profile_presets
+    return profile_presets
 
 
 def _lenient_like(template, value, bool_text: bool = True):
@@ -238,6 +249,8 @@ def _lenient_like(template, value, bool_text: bool = True):
         if isinstance(value, (int, float)):
             return str(value)
         return value
+    if template is None:  # a "not answered" field: null stays null, a wrong shape becomes null
+        return None if isinstance(value, (dict, list, tuple)) else value
     if value is None or isinstance(value, (dict, list, tuple)):
         return template
     return value
@@ -254,11 +267,30 @@ def normalize_profile(profile) -> dict:
 
 
 def load_profile() -> dict:
-    return normalize_profile(_load_json(get_data_dir() / "candidate_profile.json", _profile_defaults()))
+    """The profile, upgraded to the current schema. An old file (preset answers stored as values)
+    is migrated once and written back; see ``profile_presets.migrate`` for the rules."""
+    path = get_data_dir() / "candidate_profile.json"
+    raw = _load_json(path, {})  # a dict default: a non-object file is quarantined, not used
+    if not isinstance(raw, dict) or not raw:  # no profile yet (or an empty / unreadable file)
+        return normalize_profile(_profile_defaults())
+    migrated, changed = _presets().migrate(raw)
+    profile = normalize_profile(migrated)
+    if changed and path.exists():
+        try:
+            _save_json(path, profile)
+        except OSError:  # read-only data dir: still return the migrated view
+            _log.warning("Could not write the migrated profile")
+    return profile
 
 
 def save_profile(profile: dict):
-    _save_json(get_data_dir() / "candidate_profile.json", normalize_profile(profile))
+    """Save what the user entered. It is already in the current schema (the app only ever shows
+    and sends schema-2 fields), so nothing is migrated here; stale confirm flags are dropped."""
+    pp = _presets()
+    p = dict(profile) if isinstance(profile, dict) else {}
+    p[pp.SCHEMA_KEY] = pp.SCHEMA
+    p, _ = pp.migrate(p)
+    _save_json(get_data_dir() / "candidate_profile.json", normalize_profile(p))
 
 
 # ── LLM Settings ──────────────────────────────────────────────────────────

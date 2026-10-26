@@ -25,7 +25,10 @@
     "setUp": "सेट करें",
     "configureAI": "AI प्रदाता कॉन्फ़िगर करें",
     "setResume": "रिज़्यूमे पथ सेट करें",
-    "setupProfile": "अपनी प्रोफ़ाइल सेट करें"
+    "setupProfile": "अपनी प्रोफ़ाइल सेट करें",
+    "profileUnanswered": "{{count}} profile answers are not given yet",
+    "profileUnansweredHint": "ApplyQueue never submits a default for these: jobs whose forms ask them wait for you (Needs a person).",
+    "answerNow": "Answer on the Profile page"
   },
   "chromium": {
     "installing": "Chromium ब्राउज़र इंस्टॉल हो रहा है",

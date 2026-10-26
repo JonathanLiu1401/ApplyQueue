@@ -48,6 +48,7 @@ except ImportError:
 from core.config import get_data_dir, load_settings, save_settings, load_profile, save_profile
 from core.config import load_llm_settings, save_llm_settings
 from core import job_status as js
+from core import profile_presets
 
 # Project root for data files
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -608,7 +609,8 @@ async def health():
 # ── Profile ───────────────────────────────────────────────────────────────
 @app.get("/profile")
 async def get_profile():
-    return load_profile()
+    # _schema is internal (every save writes the current one); _confirm is shown to the user.
+    return {k: v for k, v in load_profile().items() if k != profile_presets.SCHEMA_KEY}
 
 PROFILE_MAX_BYTES = 1024 * 1024
 
@@ -1392,7 +1394,7 @@ async def start_applying(body: ApplyRequest):
 
     async def _do_apply():
         """Run apply logic directly, bypassing argparse."""
-        from core.shared_config import JOBS_FILE, CANDIDATE_PROFILE, QA_FILE, LOGS_DIR, load_json, credential_refresh_loop, get_memory_store
+        from core.shared_config import JOBS_FILE, QA_FILE, LOGS_DIR, load_json, load_apply_profile, credential_refresh_loop, get_memory_store
         from cli import apply_jobs
         import core.shared_config as _config
 
@@ -1404,7 +1406,7 @@ async def start_applying(body: ApplyRequest):
             print(f"🤖 Using {llm_settings['provider']} LLM from settings")
 
         jobs = load_json(JOBS_FILE, {})
-        profile = load_json(CANDIDATE_PROFILE, {})
+        profile = load_apply_profile()
         qa = load_json(QA_FILE, {})
         try:  # user-defined answers (M7) take precedence over learned ones
             from core.searches import store as search_store
@@ -2627,25 +2629,21 @@ async def parse_resume_to_profile():
     except Exception as e:
         return {"success": False, "message": f"Failed to create LLM: {e}"}
 
-    prompt = f"""Extract candidate profile information from this resume text. Return ONLY a valid JSON object with these fields (use empty string "" for missing text fields, 0 for missing numbers, empty array [] for missing lists, false for missing booleans):
+    prompt = f"""Extract candidate profile information from this resume text. Return ONLY a valid JSON object with these fields (use empty string "" for missing text fields, null for missing numbers, empty array [] for missing lists). Fill a field only from what the resume states; never guess:
 
 {{
   "name": "Full Name",
   "email": "email@example.com",
   "phone": "phone number",
-  "address": {{"street": "", "city": "City", "state": "State", "zip": "ZIP", "country": "USA"}},
-  "work_authorization": "Authorized to work in the US",
-  "visa_sponsorship_needed": false,
-  "willing_to_relocate": false,
-  "preferred_work_mode": "hybrid",
-  "years_of_experience": 0,
+  "address": {{"street": "", "city": "City", "state": "State", "zip": "ZIP", "country": "Country, only if stated"}},
+  "work_authorization": "Only if the resume states it",
+  "years_of_experience": null,
   "education": {{"degree": "Degree Name", "school": "University Name", "graduation": "Year or Date"}},
   "current_role": "Current or Most Recent Job Title",
   "target_job_titles": ["Job Title 1", "Job Title 2"],
   "target_locations": ["City, State"],
-  "languages": ["English"],
+  "languages": [],
   "skills": ["Skill 1", "Skill 2"],
-  "salary_expectation": {{"min": 50000, "max": 100000, "currency": "USD"}},
   "notes": ""
 }}
 
@@ -2654,8 +2652,10 @@ Rules:
 - For target_job_titles, infer 2-4 relevant titles based on their experience and skills
 - For target_locations, use the candidate's current city/state if mentioned
 - For skills, extract ALL mentioned technical and soft skills
-- For years_of_experience, calculate from work history dates if possible
+- For years_of_experience, calculate from work history dates if possible, else null
+- For languages, list only spoken languages the resume names (not programming languages), else []
 - For education, use the highest degree
+- Do NOT include sponsorship, relocation, work mode or salary: only the candidate can answer those
 - Return ONLY the JSON object, no other text
 
 RESUME TEXT:
@@ -2689,7 +2689,12 @@ RESUME TEXT:
         # Model output is coerced to the profile's own shape first: "address": "Springfield, IL" must not
         # replace the address object, a list name must not reach code that calls .strip() on it.
         existing = load_profile()
-        parsed_profile = _coerce_parsed_profile(parsed_profile, existing)
+        # Preferences are the candidate's own answers: a model that fills them anyway (from the
+        # example, or a guess) must not turn "not answered" into an invented value.
+        for key in profile_presets.NOT_FROM_RESUME:
+            parsed_profile.pop(key, None)
+        before = {p: profile_presets.get_path(existing, p) for p in profile_presets.confirm_list(existing)}
+        parsed_profile = _coerce_parsed_profile(parsed_profile, profile_presets.typed_template(existing))
         for key, value in parsed_profile.items():
             if key not in existing:
                 existing[key] = value
@@ -2710,6 +2715,10 @@ RESUME TEXT:
             elif isinstance(value, (int, float)) and value > 0:
                 existing[key] = value
 
+        # A kept old preset the résumé replaced with a stated value no longer needs confirming.
+        if before:
+            existing[profile_presets.CONFIRM_KEY] = [
+                p for p, v in before.items() if profile_presets.get_path(existing, p) == v]
         # Save the merged profile
         save_profile(existing)
 
@@ -2798,6 +2807,9 @@ async def get_setup_status():
         "gmail": gmail_done,
         "onboarding_completed": onboarding_completed,
         "all_required_done": profile_done and llm_done and resume_done and linkedin_done,
+        # Answers the user never gave (or kept from an old profile without confirming). Applying
+        # still works, but a form that asks one of the blocks_apply questions goes to Needs human.
+        "profile_unanswered": profile_presets.unanswered(profile),
     }
 
 
@@ -3107,7 +3119,9 @@ async def generate_cover_letter(body: dict):
     if not llm_settings.get("provider"):
         return _api_error("no_llm", "No LLM configured. Set up an LLM provider in Settings first.")
 
-    profile = load_profile()
+    profile = profile_presets.for_apply(load_profile())  # no unset or unconfirmed answers
+    _yrs = profile.get("years_of_experience")
+    _langs = [x for x in (profile.get("languages") or []) if isinstance(x, str)]
 
     prompt = (
         "Write a professional cover letter for the following job application.\n\n"
@@ -3117,10 +3131,10 @@ async def generate_cover_letter(body: dict):
         f"CANDIDATE PROFILE:\n"
         f"Name: {profile.get('name', '')}\n"
         f"Current Role: {profile.get('current_role', '')}\n"
-        f"Years of Experience: {profile.get('years_of_experience', 0)}\n"
+        f"Years of Experience: {_yrs if _yrs not in (None, '') else 'not stated (use only the experience named here)'}\n"
         f"Skills: {', '.join(profile.get('skills', []))}\n"
         f"Education: {profile.get('education', {}).get('degree', '')} from {profile.get('education', {}).get('school', '')}\n"
-        f"Languages: {', '.join(profile.get('languages', []))}\n\n"
+        f"Languages: {', '.join(_langs) or 'not stated'}\n\n"
         "INSTRUCTIONS:\n"
         "- Write 3-4 paragraphs\n"
         "- Highlight relevant skills and experience that match the job requirements\n"

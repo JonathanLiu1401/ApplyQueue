@@ -97,6 +97,8 @@ export default function SetupWizard({ onClose, onNavigateAway, initialStep = 0 }
     onClose();
   };
 
+  const blockingUnanswered = (status?.profile_unanswered ?? []).filter((u) => u.blocks_apply);
+
   const next = () => { fetchStatus(); setStep((s) => Math.min(s + 1, STEPS.length - 1)); };
   const prev = () => setStep((s) => Math.max(s - 1, 0));
 
@@ -263,6 +265,16 @@ export default function SetupWizard({ onClose, onNavigateAway, initialStep = 0 }
                   <span className="text-sm font-medium text-foreground">{status?.profile ? t("profileStep.profileConfigured") : t("profileStep.profileNeeded")}</span>
                 </div>
                 <p className="text-xs text-muted-foreground mb-3">{t("profileStep.keyFields")}</p>
+                {blockingUnanswered.length > 0 && (
+                  <div role="alert" data-testid="wizard-profile-unanswered"
+                    className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+                    <p className="font-semibold">{t("profileStep.unansweredTitle", { count: blockingUnanswered.length })}</p>
+                    <ul className="list-disc pl-4 mt-1">
+                      {blockingUnanswered.map((u) => <li key={u.field}>{u.label}</li>)}
+                    </ul>
+                    <p className="mt-1">{t("profileStep.unansweredHint")}</p>
+                  </div>
+                )}
                 <button onClick={() => { onNavigateAway(step); navigate("/profile"); }}
                   className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90">
                   <User className="w-4 h-4" /> {status?.profile ? t("profileStep.reviewEdit") : t("profileStep.goToProfile")}
@@ -293,6 +305,9 @@ export default function SetupWizard({ onClose, onNavigateAway, initialStep = 0 }
                     { label: t("readyStep.aiProvider"), done: status?.llm },
                     { label: t("readyStep.resume"), done: status?.resume },
                     { label: t("readyStep.profile"), done: status?.profile },
+                    { label: blockingUnanswered.length
+                        ? t("readyStep.profileAnswersMissing", { count: blockingUnanswered.length })
+                        : t("readyStep.profileAnswers"), done: blockingUnanswered.length === 0 },
                   ].map((item) => (
                     <div key={item.label} className="flex items-center gap-2">
                       {item.done ? <CheckCircle className="w-4 h-4 text-green-600" /> : <XCircle className="w-4 h-4 text-amber-500" />}

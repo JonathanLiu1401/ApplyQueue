@@ -50,7 +50,9 @@
     "reviewEdit": "مراجعة وتعديل",
     "goToProfile": "اذهب إلى الملف الشخصي",
     "autoFilledHint": "تحقق من المسميات الوظيفية والمواقع المستهدفة — هذه تقود بحث جمع الوظائف.",
-    "autoFilledLabel": "تم الملء التلقائي!"
+    "autoFilledLabel": "تم الملء التلقائي!",
+    "unansweredTitle": "{{count}} profile answers are not given yet",
+    "unansweredHint": "ApplyQueue never submits a default for these. Jobs whose forms ask them wait for you until you answer them on the Profile page."
   },
   "readyStep": {
     "heading": "كل شيء جاهز!",
@@ -61,7 +63,9 @@
     "resume": "السيرة الذاتية",
     "profile": "الملف الشخصي",
     "collectJobs": "جمع الوظائف",
-    "viewGuide": "عرض الدليل"
+    "viewGuide": "عرض الدليل",
+    "profileAnswers": "Profile answers",
+    "profileAnswersMissing": "Profile answers: {{count}} not given"
   },
   "nav": {
     "back": "رجوع",

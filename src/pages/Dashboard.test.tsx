@@ -150,6 +150,30 @@ describe("Dashboard page", () => {
     expect(screen.getByText("setup.complete")).toBeInTheDocument();
   });
 
+  it("warns about unanswered profile answers even when setup is otherwise complete", async () => {
+    const user = userEvent.setup();
+    mockGetSetupStatus.mockResolvedValue({
+      ...setupIncomplete, llm: true, resume: true, all_required_done: true,
+      profile_unanswered: [
+        { field: "visa_sponsorship_needed", label: "Visa sponsorship", state: "unset", blocks_apply: true },
+        { field: "years_of_experience", label: "Years of experience", state: "unset", blocks_apply: false },
+      ],
+    } as never);
+    renderDashboard();
+    const warning = await screen.findByTestId("setup-profile-unanswered");
+    expect(warning).toHaveTextContent("Visa sponsorship");
+    expect(warning).not.toHaveTextContent("Years of experience");
+    expect(screen.getByText("setup.allDone")).toBeInTheDocument(); // the step count is unchanged
+    await user.click(screen.getByRole("button", { name: "setup.answerNow" }));
+    expect(navigateMock).toHaveBeenCalledWith("/profile");
+  });
+
+  it("shows no unanswered warning when nothing blocks applying", async () => {
+    renderDashboard();
+    await screen.findByText("setup.gettingStarted");
+    expect(screen.queryByTestId("setup-profile-unanswered")).not.toBeInTheDocument();
+  });
+
   it("does not show the backend-not-connected banner when health is OK", async () => {
     renderDashboard();
     await screen.findByText("quickActions.title");

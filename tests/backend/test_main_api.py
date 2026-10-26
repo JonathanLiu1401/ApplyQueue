@@ -159,7 +159,9 @@ class TestProfile:
         """A fresh data dir returns the default profile skeleton."""
         body = auth_client.get("/profile").json()
         assert body["name"] == ""
-        assert body["country"] == "US"
+        assert body["country"] == ""  # not answered until the user picks one
+        assert body["visa_sponsorship_needed"] is None and body["salary_expectation"]["min"] is None
+        assert "_schema" not in body
         assert isinstance(body["target_job_titles"], list)
 
     def test_profile_save_and_load_roundtrip(self, auth_client):

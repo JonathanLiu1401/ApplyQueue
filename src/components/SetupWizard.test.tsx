@@ -216,4 +216,29 @@ describe("SetupWizard", () => {
     expect(await screen.findByText("readyStep.descriptionIncomplete")).toBeInTheDocument();
     expect(screen.getByText("readyStep.aiProvider")).toBeInTheDocument();
   });
+  it("profile step lists answers the user has not given; ready step marks them not done", async () => {
+    const status = {
+      ...baseStatus, profile: true,
+      profile_unanswered: [
+        { field: "visa_sponsorship_needed", label: "Visa sponsorship", state: "unset", blocks_apply: true },
+        { field: "salary_expectation.min", label: "Minimum salary", state: "unconfirmed", blocks_apply: true },
+      ],
+    };
+    mockGetSetupStatus.mockResolvedValue(status as never);
+    renderWizard({ initialStep: 3 });
+    const warning = await screen.findByTestId("wizard-profile-unanswered");
+    expect(warning).toHaveTextContent("Visa sponsorship");
+    expect(warning).toHaveTextContent("Minimum salary");
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /nav\.next/ }));
+    expect(await screen.findByText("readyStep.profileAnswersMissing")).toBeInTheDocument();
+  });
+
+  it("no unanswered warning and a done item when every answer is given", async () => {
+    mockGetSetupStatus.mockResolvedValue({ ...baseStatus, profile: true, profile_unanswered: [] } as never);
+    renderWizard({ initialStep: 4 });
+    expect(await screen.findByText("readyStep.profileAnswers")).toBeInTheDocument();
+    expect(screen.queryByTestId("wizard-profile-unanswered")).not.toBeInTheDocument();
+  });
 });

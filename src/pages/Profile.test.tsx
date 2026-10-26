@@ -188,8 +188,92 @@ describe("Profile page", () => {
     mockGetCountries.mockRejectedValueOnce(new Error("boom"));
     render(<Profile />);
 
-    // Loading still resolves (finally) and the form renders with default English language tag.
+    // Loading still resolves (finally) and the form renders with nothing preselected: no
+    // language, sponsorship, relocation, work mode or salary is assumed for the user.
     expect(await screen.findByRole("button", { name: "save" })).toBeInTheDocument();
-    expect(screen.getByText("English")).toBeInTheDocument();
+    expect(screen.queryByText("English")).not.toBeInTheDocument();
+    expect((screen.getByLabelText("work.visaSponsorship") as HTMLSelectElement).value).toBe("");
+    expect((screen.getByLabelText("work.willingToRelocate") as HTMLSelectElement).value).toBe("");
+    expect((screen.getByLabelText("work.workMode") as HTMLSelectElement).value).toBe("");
+    expect((screen.getByLabelText("salary.minimum") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("salary.maximum") as HTMLInputElement).value).toBe("");
+  });
+});
+
+describe("Profile page: answers the user has not given", () => {
+  beforeEach(() => {
+    mockGetCountries.mockResolvedValue({
+      success: true,
+      countries: { US: usConfig, DE: deConfig },
+      notice_period_options: [],
+    } as never);
+    mockSaveProfile.mockReset();
+    mockSaveProfile.mockResolvedValue({ success: true } as never);
+  });
+
+  it("shows unset preferences as 'Not answered' and flags them as needing input", async () => {
+    mockGetProfile.mockResolvedValue({ ...sampleProfile, visa_sponsorship_needed: null, willing_to_relocate: null,
+      preferred_work_mode: "", salary_expectation: { min: null, max: null, currency: "USD", period: "annual" } } as never);
+    render(<Profile />);
+    const banner = await screen.findByTestId("profile-unanswered");
+    for (const f of ["visa_sponsorship_needed", "willing_to_relocate", "preferred_work_mode", "salary_expectation.min"]) {
+      expect(banner.querySelector(`[data-field="${f}"]`), f).not.toBeNull();
+    }
+    expect((screen.getByLabelText("work.visaSponsorship") as HTMLSelectElement).value).toBe("");
+    expect(screen.getAllByTestId("needs-answer").length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("an explicit No is an answer and saves as false; clearing a number saves null", async () => {
+    const user = userEvent.setup();
+    mockGetProfile.mockResolvedValue({ ...sampleProfile, visa_sponsorship_needed: null,
+      salary_expectation: { min: 90000, max: null, currency: "USD", period: "annual" } } as never);
+    render(<Profile />);
+    await screen.findByDisplayValue("Ada Lovelace");
+    const banner = screen.getByTestId("profile-unanswered");
+    expect(banner.querySelector('[data-field="visa_sponsorship_needed"]')).not.toBeNull();
+    await user.selectOptions(screen.getByLabelText("work.visaSponsorship"), "no");
+    expect(screen.getByTestId("profile-unanswered").querySelector('[data-field="visa_sponsorship_needed"]')).toBeNull();
+    await user.clear(screen.getByLabelText("salary.minimum"));
+    await user.click(screen.getByRole("button", { name: "save" }));
+    await waitFor(() => expect(mockSaveProfile).toHaveBeenCalled());
+    const payload = mockSaveProfile.mock.calls.at(-1)![0];
+    expect(payload.visa_sponsorship_needed).toBe(false);
+    expect(payload.salary_expectation.min).toBeNull();
+    expect(payload.willing_to_relocate ?? null).toBeNull();
+  });
+
+  it("kept-from-an-old-version values ask for confirmation; confirming saves without the flag", async () => {
+    const user = userEvent.setup();
+    mockGetProfile.mockResolvedValue({ ...sampleProfile, visa_sponsorship_needed: false, willing_to_relocate: true,
+      preferred_work_mode: "remote", years_of_experience: 6, phone_country_code: "+1",
+      address: { street: "", city: "", state: "", zip: "", country: "United States" },
+      salary_expectation: { min: 50000, max: 100000, currency: "USD", period: "annual" },
+      _confirm: ["visa_sponsorship_needed", "salary_expectation.min", "salary_expectation.max"] } as never);
+    render(<Profile />);
+    await screen.findByDisplayValue("Ada Lovelace");
+    // Kept, not erased: the value shows, with a "Please confirm" flag.
+    expect((screen.getByLabelText("work.visaSponsorship") as HTMLSelectElement).value).toBe("no");
+    const flags = screen.getAllByTestId("needs-answer").filter((el) => el.getAttribute("data-state") === "unconfirmed");
+    expect(flags.length).toBe(3);
+    await user.click(screen.getByRole("button", { name: "unanswered.confirmButton" }));
+    await waitFor(() => expect(mockSaveProfile).toHaveBeenCalled());
+    const payload = mockSaveProfile.mock.calls.at(-1)![0];
+    expect(payload._confirm).toEqual([]);
+    expect(payload.visa_sponsorship_needed).toBe(false);
+    expect(screen.queryByTestId("profile-unanswered")).not.toBeInTheDocument();
+  });
+
+  it("editing one kept value confirms only that one", async () => {
+    const user = userEvent.setup();
+    mockGetProfile.mockResolvedValue({ ...sampleProfile, visa_sponsorship_needed: false, willing_to_relocate: false,
+      _confirm: ["visa_sponsorship_needed", "willing_to_relocate"] } as never);
+    render(<Profile />);
+    await screen.findByDisplayValue("Ada Lovelace");
+    await user.selectOptions(screen.getByLabelText("work.willingToRelocate"), "yes");
+    await user.click(screen.getByRole("button", { name: "save" }));
+    await waitFor(() => expect(mockSaveProfile).toHaveBeenCalled());
+    const payload = mockSaveProfile.mock.calls.at(-1)![0];
+    expect(payload._confirm).toEqual(["visa_sponsorship_needed"]);
+    expect(payload.willing_to_relocate).toBe(true);
   });
 });

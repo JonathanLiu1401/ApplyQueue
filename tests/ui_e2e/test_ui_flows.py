@@ -129,6 +129,38 @@ def test_profile_unicode_rtl_emoji_round_trip(world):
     st.api("PUT", "/profile", {**st.api("GET", "/profile"), "name": PROFILE["name"], "current_role": "Data Engineer"})
 
 
+def test_unanswered_preferences_are_flagged_not_preset(world):
+    """Sponsorship, relocation, work mode and salary start as "not answered": nothing is preselected,
+    the page and the dashboard flag them, and choosing an explicit "No" saves false (not a default)."""
+    st, page = world["st"], world["page"]
+    prof = st.api("GET", "/profile")
+    for k in ("visa_sponsorship_needed", "willing_to_relocate"):
+        assert prof[k] is None, prof
+    assert prof["salary_expectation"]["min"] is None and prof["preferred_work_mode"] == ""
+    blocking = [u["field"] for u in st.api("GET", "/setup/status")["profile_unanswered"] if u["blocks_apply"]]
+    assert "visa_sponsorship_needed" in blocking
+
+    goto(page, st, "/")
+    page.get_by_test_id("setup-profile-unanswered").wait_for(timeout=15000)
+    goto(page, st, "/profile")
+    banner = page.get_by_test_id("profile-unanswered")
+    banner.wait_for(timeout=15000)
+    visa = page.get_by_label("Visa Sponsorship Needed", exact=True)
+    assert visa.input_value() == ""
+    assert page.get_by_label("Willing to Relocate", exact=True).input_value() == ""
+    assert page.get_by_label("Work Mode", exact=True).input_value() == ""
+    visa.select_option("no")
+    page.get_by_role("button", name=re.compile("^Save")).first.click()
+    _until(lambda: st.api("GET", "/profile")["visa_sponsorship_needed"] is False)
+    after = st.api("GET", "/profile")
+    assert after["willing_to_relocate"] is None and after["salary_expectation"]["min"] is None
+    blocking = [u["field"] for u in st.api("GET", "/setup/status")["profile_unanswered"] if u["blocks_apply"]]
+    assert "visa_sponsorship_needed" not in blocking and "willing_to_relocate" in blocking
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    assert page.get_by_label("Visa Sponsorship Needed", exact=True).input_value() == "no"
+
+
 def test_quick_start_schedule_and_mode(world):
     """3-step quick start (CV, titles + locations, Start), then a schedule and review→auto."""
     st, page = world["st"], world["page"]

@@ -21,6 +21,7 @@ PROFILE = {
     "cover_letter": ("Dear hiring team, I have spent six years building reliable data pipelines in Python "
                      "at Example Labs and would like to bring that experience to your team."),
     "eeo": {},
+    "_schema": 2,  # saved by the current app: every answer above is the candidate's own
 }
 
 QA = {"Are you open to relocation?": "Yes"}

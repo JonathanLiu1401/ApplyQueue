@@ -50,7 +50,9 @@
     "reviewEdit": "Vérifier et modifier",
     "goToProfile": "Aller au profil",
     "autoFilledHint": "Vérifiez les Postes et Lieux recherchés — ils dirigent la recherche d'emplois.",
-    "autoFilledLabel": "Rempli automatiquement !"
+    "autoFilledLabel": "Rempli automatiquement !",
+    "unansweredTitle": "{{count}} profile answers are not given yet",
+    "unansweredHint": "ApplyQueue never submits a default for these. Jobs whose forms ask them wait for you until you answer them on the Profile page."
   },
   "readyStep": {
     "heading": "Tout est prêt !",
@@ -61,7 +63,9 @@
     "resume": "CV",
     "profile": "Profil",
     "collectJobs": "Collecter des emplois",
-    "viewGuide": "Voir le guide"
+    "viewGuide": "Voir le guide",
+    "profileAnswers": "Profile answers",
+    "profileAnswersMissing": "Profile answers: {{count}} not given"
   },
   "nav": {
     "back": "Retour",

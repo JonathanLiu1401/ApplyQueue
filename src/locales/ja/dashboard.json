@@ -25,7 +25,10 @@
     "setUp": "設定する",
     "configureAI": "AIプロバイダーを設定",
     "setResume": "履歴書のパスを設定",
-    "setupProfile": "プロフィールを設定"
+    "setupProfile": "プロフィールを設定",
+    "profileUnanswered": "{{count}} profile answers are not given yet",
+    "profileUnansweredHint": "ApplyQueue never submits a default for these: jobs whose forms ask them wait for you (Needs a person).",
+    "answerNow": "Answer on the Profile page"
   },
   "chromium": {
     "installing": "Chromiumブラウザをインストール中",

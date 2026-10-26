@@ -50,7 +50,9 @@
     "reviewEdit": "Review & Edit Profile",
     "goToProfile": "Go to Profile",
     "autoFilledHint": "Check Target Job Titles and Target Locations — these drive the job collection search.",
-    "autoFilledLabel": "Auto-filled!"
+    "autoFilledLabel": "Auto-filled!",
+    "unansweredTitle": "{{count}} profile answers are not given yet",
+    "unansweredHint": "ApplyQueue never submits a default for these. Jobs whose forms ask them wait for you until you answer them on the Profile page."
   },
   "readyStep": {
     "heading": "You're All Set!",
@@ -61,7 +63,9 @@
     "resume": "Resume",
     "profile": "Profile",
     "collectJobs": "Collect Jobs",
-    "viewGuide": "View Guide"
+    "viewGuide": "View Guide",
+    "profileAnswers": "Profile answers",
+    "profileAnswersMissing": "Profile answers: {{count}} not given"
   },
   "nav": {
     "back": "Back",

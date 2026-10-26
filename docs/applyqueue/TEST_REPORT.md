@@ -1,6 +1,6 @@
 # ApplyQueue M8 test report (e2e + break-it)
 
-Status: **Ready for Art's publish review on Linux; Windows, Intel Mac and Apple silicon are blocked on Art (see "Blocked on Art")**. Last update: 2026-10-25 20:25 PDT (code at 45f16cb; CI on self-hosted runners only).
+Status: **Ready for Art's publish review on Linux; Windows, Intel Mac and Apple silicon are blocked on Art (see "Blocked on Art")**. Last update: 2026-10-25 21:30 PDT (code at 45f16cb + "not answered" profile state, §5 last row; CI on self-hosted runners only).
 
 ## Summary
 
@@ -13,7 +13,9 @@ Status: **Ready for Art's publish review on Linux; Windows, Intel Mac and Apple 
   hostile pages, sync races, DST, mail token expiry and multi-step forms. M9 (§3, last rows)
   added malformed résumé PDFs, sloppy LLM replies, wrong-typed request bodies and settings,
   third-party questions on ATS forms, and a model API key revoked mid-run. **14 real bugs found in
-  M9, all fixed with tests** (§5).
+  M9, all fixed with tests** (§5). Profile preferences the user never answered (sponsorship,
+  relocation, salary, work mode) are now stored as "not answered" instead of a preset, and a form
+  that asks one goes to a person instead of being sent a default (Art, 2026-10-25: "yes, not answered").
 - **Not tested:** Windows (no machine), Intel Mac (runner not set up yet), Apple silicon (no
   machine), sync against a real github.com repo (needs Art's OK). Nothing about these is known to
   be broken; they have simply not run since dd77c14.
@@ -170,6 +172,7 @@ and (b) the launch/health smoke of the real `.app` bundle.
 | **M9:** sloppy LLM replies when parsing a résumé: fenced JSON followed by prose with `{}`, two JSON objects, prose only; wrong types (list name, number phone, address/education as text, `null` skills, "6+" years, "150k" salary, "no" for a yes/no) | `test_api_breakit_m9.py` | **bugs fixed**: trailing braces broke parsing; wrong types were saved into the profile (a list name, an address string replacing the address object), which later crashed setup status and the Profile page. Values are now coerced to the profile's types or dropped |
 | **M9:** every POST/PUT endpoint fuzzed with `null`, numbers, bools, lists, objects and 3000 astral/RTL/NUL characters in every common field, then every GET endpoint | `test_api_breakit_m9.py::test_wrong_typed_bodies_never_500_or_poison_reads` | **bugs fixed**: 500s on 10 endpoints (`/jobs/add`, `/jobs/status`, `/jobs/confirm-email`, `/jobs/review`, `/searches/quickstart`, `/local-models/use`, `/resume/tailor`, `/resume/tailor/refine`, `/resume/tailor/get-by-url`, `/cover-letter/generate`); `PUT /settings` stored `resume_path: true`, which then crashed `/setup/status` and résumé parsing; `blocked_domains: "evil.com"` was saved as one blocked domain per character; `max_failures: null` crashed the save |
 | **M9:** hand-edited profile/settings JSON with `null` or wrong-typed fields | `test_breakit_m9.py` | **bug fixed**: crashed `/setup/status`, the cover letter and the Profile page. Loading now repairs the shapes callers rely on (unusual but harmless values are left alone) |
+| Untouched profile presets: sponsorship No, relocation No, salary 50000–100000, work mode hybrid, years 0, languages English, country US/USA, phone code +1 (formerly §6) | `tests/backend/core/test_profile_not_answered.py`, `tests/backend/test_api_not_answered.py`, `test_form_guard_mock_form.py::test_unanswered_sponsorship_is_left_for_the_user_not_defaulted`, `tests/e2e/test_agent_apply_e2e.py::test_unanswered_sponsorship_goes_to_a_person_not_a_default` / `::test_old_profile_with_untouched_sponsorship_is_not_sent`, `tests/ui_e2e/test_ui_flows.py::test_unanswered_preferences_are_flagged_not_preset`, vitest `Profile`, `SetupWizard`, `Dashboard`, `profileAnswers` | **fixed** (Art: "yes, not answered"): a user who never opened the Profile page applied with those presets. They are now an explicit "not answered" state (`null`, `""` or `[]`), shown with no preselected value and a "Needs your answer" flag on the Profile page, in the setup wizard and on the Dashboard (`/setup/status` → `profile_unanswered`). The apply engine never sends a preset: a form question about an unanswered preference (sponsorship, relocation, salary, work mode) stops autofill and refuses the submit, and the job goes to needs-human with the field named. Old profiles are migrated on load (see §6 for the ambiguity rule) |
 | **M9:** the AI provider rejects the API key mid-run (revoked, expired, out of credit; real 401 `invalid_api_key` from an OpenAI-compatible endpoint) | `tests/e2e/test_llm_key_revoked_m9.py` (real browser_use Agent + Chromium + mock ATS) | **bug fixed**: the job was marked failed (not its fault) and the worker went on to "fail" every queued job in about 4 s each; failed jobs are never retried, so a revoked key emptied the queue. Now the job stays pending and the run stops with "fix the key in Settings" |
 
 ## 4. Real local Ollama (honest numbers)
@@ -222,7 +225,8 @@ and (b) the launch/health smoke of the real `.app` bundle.
 - Sync: `renew_named` can re-create a lock that another device took over and then released (narrow window; not fixed in M8).
 - An EEO select with no "decline" option and no profile data gets no answer, so the run goes to a person.
 - A one-word (mononym) name fills Last name with the full name.
-- Yes/no profile fields (sponsorship, relocation) and the salary range start with visible form defaults (No, No, 50000–100000). ApplyQueue cannot tell an untouched default from a real answer, so a user who never reviews the Profile page applies with those values. (Years of experience 0 is treated as unset since M9.)
+- "Not answered" migration (fixed above): profiles saved before this change carry no record of which values were typed. A field missing from the file becomes "not answered", and a value that differs from the old preset is kept as the user's answer. A value **equal** to the old preset (for example sponsorship No) cannot be told apart from an untouched default, so it is **kept**, marked "Please confirm" on the Profile page, and **not used in applications until the user confirms or changes it** (a form that asks it goes to a person). Exceptions: a profile with nothing the user typed (no name, email, résumé fields and so on) has its presets cleared, and years of experience 0 is always "not answered" (as since M9). One click ("These are my answers") confirms all kept values.
+- The new "not answered" strings are English in the 12 non-English locales until they are translated.
 - When the model API key is rejected, the run stops and the jobs stay pending, but a schedule is not paused: the next scheduled run tries once more (one browser launch) and stops again.
 - Wrong-typed profile/settings fields that cannot be repaired (for example an address saved as plain text) are replaced by the default when loaded; the file keeps the original until the next save.
 - A page whose HTML keeps streaming is stopped after 35 s; a real ATS that streams its first HTML for longer than that would be cut off (`APPLYQUEUE_PAGE_LOAD_BUDGET_S` raises it).

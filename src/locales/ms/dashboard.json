@@ -25,7 +25,10 @@
     "setUp": "Sediakan",
     "configureAI": "Konfigurasi pembekal AI",
     "setResume": "Tetapkan laluan resume",
-    "setupProfile": "Sediakan profil anda"
+    "setupProfile": "Sediakan profil anda",
+    "profileUnanswered": "{{count}} profile answers are not given yet",
+    "profileUnansweredHint": "ApplyQueue never submits a default for these: jobs whose forms ask them wait for you (Needs a person).",
+    "answerNow": "Answer on the Profile page"
   },
   "chromium": {
     "installing": "Memasang pelayar Chromium",

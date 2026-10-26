@@ -25,7 +25,10 @@
     "setUp": "Set up",
     "configureAI": "Configure AI provider",
     "setResume": "Set resume path",
-    "setupProfile": "Set up your profile"
+    "setupProfile": "Set up your profile",
+    "profileUnanswered": "{{count}} profile answers are not given yet",
+    "profileUnansweredHint": "ApplyQueue never submits a default for these: jobs whose forms ask them wait for you (Needs a person).",
+    "answerNow": "Answer on the Profile page"
   },
   "chromium": {
     "installing": "Installing Chromium Browser",

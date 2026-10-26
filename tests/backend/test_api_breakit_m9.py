@@ -86,8 +86,9 @@ def test_wrong_typed_llm_fields_cannot_corrupt_the_profile(client, monkeypatch, 
     assert p["name"] == "Alex Example" and p["phone"] == "5550100"
     assert isinstance(p["address"], dict) and isinstance(p["education"], dict)
     assert isinstance(p["skills"], list)
-    assert p["years_of_experience"] == 6 and p["visa_sponsorship_needed"] is False
-    assert p["salary_expectation"]["min"] == 150000
+    assert p["years_of_experience"] == 6
+    # Preferences are the candidate's own answers: never taken from résumé parsing.
+    assert p["visa_sponsorship_needed"] is None and p["salary_expectation"]["min"] is None
     assert client.get("/setup/status", headers=AUTH).status_code == 200
 
 

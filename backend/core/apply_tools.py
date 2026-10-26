@@ -145,6 +145,27 @@ def _remaining_after_ledger(fields: list[fg.Field], ledger: RunLedger) -> list[f
     return [f for f in fg.unanswered(fields) if f.label.strip().lower() not in reported]
 
 
+def _gate_preferences(fields: list[fg.Field], profile: dict, qa: dict, ledger: RunLedger) -> list[dict]:
+    """Questions only the candidate can answer that the profile leaves unanswered: each is recorded
+    as needs-human (once) so the job goes to a person instead of being sent with a guess."""
+    return _record_gated(fg.preference_gate(fields, profile, qa), ledger)
+
+
+def _record_gated(gated: list[dict], ledger: RunLedger) -> list[dict]:
+    reported = {e["field_label"].strip().lower() for e in ledger.needs_human}
+    for g in gated:
+        if g["label"].strip().lower() not in reported:
+            ledger.add_needs_human(g["label"], fg.preference_reason(g["question"]))
+            reported.add(g["label"].strip().lower())
+    return gated
+
+
+def _gate_error(gated: list[dict]) -> str:
+    qs = sorted({g["question"] for g in gated})
+    return ("STOP - this form asks what the candidate never answered in their profile: " + "; ".join(qs) +
+            ". Do not answer it yourself and do not submit. It is recorded for the user; call done now.")
+
+
 def _fmt(fields: list[fg.Field]) -> str:
     return json.dumps([f.brief() for f in fields], ensure_ascii=False)
 
@@ -479,6 +500,10 @@ def build_apply_tools(*, ledger: RunLedger, profile: dict, qa: dict, context: di
             ledger.blocked_exfil += 1
             return _refusal("autofilling the candidate's profile", where, origins)
         res = await fg.autofill(session_evaluator(browser_session), profile, qa, context)
+        if res.get("needs_profile"):
+            _record_gated(res["needs_profile"], ledger)
+            return ActionResult(error=_gate_error(res["needs_profile"]),
+                                long_term_memory=("autofill: " + _gate_error(res["needs_profile"]))[:1500])
         summary = {"filled": [f["label"] for f in res["filled"]],
                    "failed_all_strategies": [f["label"] for f in res["failed"]],
                    "answer_yourself": res["remaining"]}
@@ -504,6 +529,10 @@ def build_apply_tools(*, ledger: RunLedger, profile: dict, qa: dict, context: di
                   "answered; otherwise returns the unanswered questions.", param_model=IndexParams)
     async def submit_form_guarded(params: IndexParams, browser_session: BrowserSession) -> ActionResult:
         scanned = await fg.scan(session_evaluator(browser_session))
+        gated = _gate_preferences(scanned, profile, qa, ledger)
+        if gated:  # filled or not: a value there did not come from the candidate
+            ledger.blocked_submits += 1
+            return ActionResult(error="Refused to click. " + _gate_error(gated))
         remaining = _remaining_after_ledger(scanned, ledger)
         ledger.unanswered_last = [f.brief() for f in remaining]
         if remaining:

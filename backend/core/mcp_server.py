@@ -241,7 +241,9 @@ class ApplyQueueTools:
         return _load_json(self.data_dir / "settings.json", {}) or {}
 
     def _profile(self) -> dict:
-        return _load_json(self.data_dir / "candidate_profile.json", {}) or {}
+        # Without unset / unconfirmed answers: a preset is never typed into a form.
+        raw = _load_json(self.data_dir / "candidate_profile.json", {}) or {}
+        return fg.apply_profile(raw if isinstance(raw, dict) else {})
 
     def _qa(self) -> dict:
         qa = _load_json(self.data_dir / "qa_repository.json", {})
@@ -286,6 +288,24 @@ class ApplyQueueTools:
     def _remaining(self, fields: list) -> list:
         reported = {e["field_label"].strip().lower() for e in self.state.ledger().get("needs_human", [])}
         return [f for f in fg.unanswered(fields) if f.label.strip().lower() not in reported]
+
+    def _record_gated(self, gated: list[dict]) -> None:
+        """Questions the candidate never answered in their profile go to a person (never guessed)."""
+        def _m(led):
+            seen = {e["field_label"].strip().lower() for e in led["needs_human"]}
+            for g in gated:
+                if g["label"].strip().lower() not in seen:
+                    led["needs_human"].append({"field_label": g["label"][:200],
+                                               "reason": fg.preference_reason(g["question"])[:500]})
+                    seen.add(g["label"].strip().lower())
+        if gated:
+            self.state.update_ledger(_m)
+
+    @staticmethod
+    def _gate_message(gated: list[dict]) -> str:
+        return ("this form asks what the candidate never answered in their profile: " +
+                "; ".join(sorted({g["question"] for g in gated})) +
+                ". Do not answer it yourself and do not submit; it is recorded for the user. Finish this job now.")
 
     def _check_url(self, url: str) -> str:
         u = urlparse(url)
@@ -540,6 +560,9 @@ class ApplyQueueTools:
             res = await fg.autofill(self._evaluator(frame), self._profile(), self._qa(),
                                     {"company": job.get("company", ""), "title": job.get("title", ""),
                                      "source": job.get("source") or "LinkedIn"})
+            if res.get("needs_profile"):
+                self._record_gated(res["needs_profile"])
+                res["stop"] = "STOP - " + self._gate_message(res["needs_profile"])
             return res
 
         @add("form_fill", "Fill one form field by its key from form_scan (handles selects, radios, checkboxes, "
@@ -573,6 +596,11 @@ class ApplyQueueTools:
              _obj({"ref": S_REF}, ["ref"]))
         async def form_submit(ref: str):
             _, fields = await self._pick_form_frame()
+            gated = fg.preference_gate(fields, self._profile(), self._qa())
+            if gated:  # filled or not: a value there did not come from the candidate
+                self._record_gated(gated)
+                self.state.update_ledger(lambda led: led.__setitem__("blocked_submits", led["blocked_submits"] + 1))
+                raise ToolError("Refused to click: " + self._gate_message(gated))
             rem = self._remaining(fields)
             self.state.update_ledger(lambda led: led.__setitem__("unanswered_last", [f.brief() for f in rem]))
             if rem:

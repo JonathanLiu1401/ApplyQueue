@@ -25,7 +25,10 @@
     "setUp": "设置",
     "configureAI": "配置 AI 提供商",
     "setResume": "设置简历路径",
-    "setupProfile": "设置你的个人资料"
+    "setupProfile": "设置你的个人资料",
+    "profileUnanswered": "{{count}} profile answers are not given yet",
+    "profileUnansweredHint": "ApplyQueue never submits a default for these: jobs whose forms ask them wait for you (Needs a person).",
+    "answerNow": "Answer on the Profile page"
   },
   "chromium": {
     "installing": "正在安装 Chromium 浏览器",

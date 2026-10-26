@@ -50,7 +50,9 @@
     "reviewEdit": "查看并编辑个人资料",
     "goToProfile": "前往个人资料",
     "autoFilledHint": "请检查目标职位名称和目标地点 — 这些驱动职位收集搜索。",
-    "autoFilledLabel": "已自动填写！"
+    "autoFilledLabel": "已自动填写！",
+    "unansweredTitle": "{{count}} profile answers are not given yet",
+    "unansweredHint": "ApplyQueue never submits a default for these. Jobs whose forms ask them wait for you until you answer them on the Profile page."
   },
   "readyStep": {
     "heading": "一切就绪！",
@@ -61,7 +63,9 @@
     "resume": "简历",
     "profile": "个人资料",
     "collectJobs": "收集职位",
-    "viewGuide": "查看指南"
+    "viewGuide": "查看指南",
+    "profileAnswers": "Profile answers",
+    "profileAnswersMissing": "Profile answers: {{count}} not given"
   },
   "nav": {
     "back": "返回",

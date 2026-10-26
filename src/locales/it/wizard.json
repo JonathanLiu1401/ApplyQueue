@@ -50,7 +50,9 @@
     "reviewEdit": "Rivedi e modifica il profilo",
     "goToProfile": "Vai al profilo",
     "autoFilledHint": "Controlla Titoli di lavoro target e Località target — questi guidano la ricerca per la raccolta delle offerte.",
-    "autoFilledLabel": "Compilato automaticamente!"
+    "autoFilledLabel": "Compilato automaticamente!",
+    "unansweredTitle": "{{count}} profile answers are not given yet",
+    "unansweredHint": "ApplyQueue never submits a default for these. Jobs whose forms ask them wait for you until you answer them on the Profile page."
   },
   "readyStep": {
     "heading": "Tutto pronto!",
@@ -61,7 +63,9 @@
     "resume": "CV",
     "profile": "Profilo",
     "collectJobs": "Raccogli offerte",
-    "viewGuide": "Visualizza la guida"
+    "viewGuide": "Visualizza la guida",
+    "profileAnswers": "Profile answers",
+    "profileAnswersMissing": "Profile answers: {{count}} not given"
   },
   "nav": {
     "back": "Indietro",

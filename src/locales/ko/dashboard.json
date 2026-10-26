@@ -25,7 +25,10 @@
     "setUp": "설정",
     "configureAI": "AI 공급자 설정",
     "setResume": "이력서 경로 설정",
-    "setupProfile": "프로필 설정"
+    "setupProfile": "프로필 설정",
+    "profileUnanswered": "{{count}} profile answers are not given yet",
+    "profileUnansweredHint": "ApplyQueue never submits a default for these: jobs whose forms ask them wait for you (Needs a person).",
+    "answerNow": "Answer on the Profile page"
   },
   "chromium": {
     "installing": "Chromium 브라우저 설치 중",

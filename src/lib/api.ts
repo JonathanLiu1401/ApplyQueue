@@ -320,6 +320,8 @@ export interface SetupStatus {
   gmail: boolean;
   onboarding_completed: boolean;
   all_required_done: boolean;
+  /** Preset profile answers still waiting for the user (unset, or kept but unconfirmed). */
+  profile_unanswered?: { field: string; label: string; state: "unset" | "unconfirmed"; blocks_apply: boolean }[];
 }
 
 export async function getSetupStatus() {

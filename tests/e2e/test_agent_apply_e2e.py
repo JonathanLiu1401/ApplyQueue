@@ -65,7 +65,7 @@ def env(tmp_path, monkeypatch):
     ats.close()
 
 
-def run_job(env, url, qa=None):
+def run_job(env, url, qa=None, profile=None):
     from core import jobs_store
     jf, _ = jobs_store._paths()
     jf.parent.mkdir(parents=True, exist_ok=True)
@@ -76,7 +76,8 @@ def run_job(env, url, qa=None):
     try:
         status = asyncio.run(env["apply_jobs"].apply_to_job(
             {"url": url, "title": "Platform Engineer", "company": "Example Corp"},
-            PROFILE, QA if qa is None else qa, [], False, 1, resume_path_override=env["resume"]))
+            PROFILE if profile is None else profile, QA if qa is None else qa, [], False, 1,
+            resume_path_override=env["resume"]))
     except Exception as e:  # pragma: no cover
         if "executable" in str(e).lower() or "chrom" in str(e).lower() and "not found" in str(e).lower():
             pytest.skip(f"No Chromium for browser_use: {e}")
@@ -164,6 +165,34 @@ def test_unanswerable_question_flags_a_person(env):
         status, job, _ = run_job(env, env["ats"].job_url("gh"))
     finally:
         scripted_llm.essay_for = orig
+    assert status == "needs_human"
+    assert env["ats"].submissions_for("gh") == []
+
+
+def test_unanswered_sponsorship_goes_to_a_person_not_a_default(env):
+    # Rule: an untouched preset is "not answered". The persona never answered sponsorship
+    # (the old app would have sent its preset "No"); the form asks it, so nothing is submitted and
+    # the job waits for the user, with the reason saying which profile answer is missing.
+    from core import profile_presets
+    profile = profile_presets.for_apply({**PROFILE, "visa_sponsorship_needed": None})
+    status, job, _ = run_job(env, env["ats"].job_url("gh"), profile=profile)
+    assert status == "needs_human"
+    assert env["ats"].submissions_for("gh") == []
+    assert "Visa sponsorship" in json.dumps(job, ensure_ascii=False)
+
+
+def test_old_profile_with_untouched_sponsorship_is_not_sent(env, tmp_path):
+    # A profile file from before the "not answered" state: sponsorship sits at the old preset No.
+    # It is kept (it may be real) but not used until the user confirms it, so the form is held.
+    from core import profile_presets
+    from core.shared_config import load_apply_profile
+    old = {k: v for k, v in PROFILE.items() if k != "_schema"}
+    f = tmp_path / "candidate_profile.json"
+    f.write_text(json.dumps(old), "utf-8")
+    profile = load_apply_profile(f)
+    assert profile["visa_sponsorship_needed"] is None
+    assert profile_presets.migrate(old)[0]["visa_sponsorship_needed"] is False  # kept for the user
+    status, _, _ = run_job(env, env["ats"].job_url("gh"), profile=profile)
     assert status == "needs_human"
     assert env["ats"].submissions_for("gh") == []
 

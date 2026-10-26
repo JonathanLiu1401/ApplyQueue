@@ -153,6 +153,9 @@ export default function Dashboard() {
   ];
 
   const allRequiredDone = setupStatus?.all_required_done;
+  // Profile answers the user never gave (sponsorship, relocation, salary, work mode): forms that ask
+  // them are held for the user instead of being sent a preset.
+  const blockingUnanswered = (setupStatus?.profile_unanswered ?? []).filter((u) => u.blocks_apply);
   const completedCount = setupSteps.filter((s) => s.done).length;
 
   if (loading) {
@@ -261,6 +264,18 @@ export default function Dashboard() {
             {t("setup.viewGuide")}
           </button>
         </div>
+
+        {blockingUnanswered.length > 0 && (
+          <div role="alert" data-testid="setup-profile-unanswered"
+            className="mb-4 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+            <p className="font-semibold">{t("setup.profileUnanswered", { count: blockingUnanswered.length })}</p>
+            <p className="mt-1">{blockingUnanswered.map((u) => u.label).join(", ")}</p>
+            <p className="mt-1 text-[13px]">{t("setup.profileUnansweredHint")}</p>
+            <button onClick={() => navigate("/profile")} className="mt-2 text-[13px] text-primary font-semibold hover:underline">
+              {t("setup.answerNow")}
+            </button>
+          </div>
+        )}
 
         {allRequiredDone ? (
           <div className="bg-[#F0FFF0] rounded-2xl p-5 flex items-start gap-3">

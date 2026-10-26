@@ -14,8 +14,8 @@ export interface Education {
 }
 
 export interface SalaryExpectation {
-  min: number;
-  max: number;
+  min: number | null; // null = not answered
+  max: number | null;
   currency: string;
   period: "annual" | "monthly";
 }
@@ -28,10 +28,10 @@ export interface CandidateProfile {
   country: string;
   address: Address;
   work_authorization: string;
-  visa_sponsorship_needed: boolean;
-  willing_to_relocate: boolean;
-  preferred_work_mode: string;
-  years_of_experience: number;
+  visa_sponsorship_needed: boolean | null; // null = not answered (never a preset)
+  willing_to_relocate: boolean | null;
+  preferred_work_mode: string; // "" = not answered
+  years_of_experience: number | null;
   education: Education;
   current_role: string;
   target_job_titles: string[];
@@ -45,6 +45,9 @@ export interface CandidateProfile {
   cover_letter: string;
   date_format: string;
   notes: string;
+  /** Values kept from an older profile that equal its old presets: shown for confirmation and
+   * not used in applications until the user confirms or changes them. */
+  _confirm?: string[];
 }
 
 // ── LLM Settings ──────────────────────────────────────────────────────────

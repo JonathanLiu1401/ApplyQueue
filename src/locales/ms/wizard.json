@@ -50,7 +50,9 @@
     "reviewEdit": "Semak & Edit",
     "goToProfile": "Pergi ke Profil",
     "autoFilledHint": "Semak Jawatan Sasaran dan Lokasi Sasaran — ini memacu carian pengumpulan kerja.",
-    "autoFilledLabel": "Diisi secara automatik!"
+    "autoFilledLabel": "Diisi secara automatik!",
+    "unansweredTitle": "{{count}} profile answers are not given yet",
+    "unansweredHint": "ApplyQueue never submits a default for these. Jobs whose forms ask them wait for you until you answer them on the Profile page."
   },
   "readyStep": {
     "heading": "Anda sudah sedia!",
@@ -61,7 +63,9 @@
     "resume": "Resume",
     "profile": "Profil",
     "collectJobs": "Kumpul Kerja",
-    "viewGuide": "Lihat Panduan"
+    "viewGuide": "Lihat Panduan",
+    "profileAnswers": "Profile answers",
+    "profileAnswersMissing": "Profile answers: {{count}} not given"
   },
   "nav": {
     "back": "Kembali",

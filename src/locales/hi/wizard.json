@@ -50,7 +50,9 @@
     "reviewEdit": "समीक्षा और संपादन",
     "goToProfile": "प्रोफ़ाइल पर जाएँ",
     "autoFilledHint": "लक्षित नौकरी शीर्षक और लक्षित स्थान जाँचें — ये नौकरी संकलन खोज को संचालित करते हैं।",
-    "autoFilledLabel": "ऑटो-फ़िल हो गया!"
+    "autoFilledLabel": "ऑटो-फ़िल हो गया!",
+    "unansweredTitle": "{{count}} profile answers are not given yet",
+    "unansweredHint": "ApplyQueue never submits a default for these. Jobs whose forms ask them wait for you until you answer them on the Profile page."
   },
   "readyStep": {
     "heading": "आप तैयार हैं!",
@@ -61,7 +63,9 @@
     "resume": "रिज़्यूमे",
     "profile": "प्रोफ़ाइल",
     "collectJobs": "नौकरियाँ संकलित करें",
-    "viewGuide": "गाइड देखें"
+    "viewGuide": "गाइड देखें",
+    "profileAnswers": "Profile answers",
+    "profileAnswersMissing": "Profile answers: {{count}} not given"
   },
   "nav": {
     "back": "वापस",

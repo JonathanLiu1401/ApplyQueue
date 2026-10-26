@@ -144,6 +144,24 @@ async def test_connection(llm) -> str:
         raise RuntimeError(_friendly_llm_error(str(e), getattr(e, "status_code", None)))
 
 
+_LLM_AUTH_MARKERS = (
+    "invalid_api_key", "incorrect api key", "invalid api key", "invalid x-api-key", "api key not valid",
+    "authentication_error", "api key expired", "api_key_invalid", "insufficient_quota",
+    "credit balance is too low",
+)
+
+
+def is_llm_auth_error(text) -> bool:
+    """True when an agent error says the model provider refused the key (revoked, expired, wrong,
+    out of credit). Every later job would fail the same way, so the run should stop instead."""
+    t = str(text or "").lower()
+    if not t:
+        return False
+    if any(m in t for m in _LLM_AUTH_MARKERS):
+        return True
+    return ("error code: 401" in t or "error code: 403" in t or "status_code=401" in t) and "key" in t
+
+
 def _friendly_llm_error(message: str, status_code=None) -> str:
     """Map an LLM provider failure to a friendly, actionable message."""
     msg = (message or "").lower()

@@ -181,8 +181,8 @@ def _save_json(path: Path, data):
 
 # ── Profile ───────────────────────────────────────────────────────────────
 
-def load_profile() -> dict:
-    return _load_json(get_data_dir() / "candidate_profile.json", {
+def _profile_defaults() -> dict:
+    return {
         "name": "",
         "email": "",
         "phone": "",
@@ -207,11 +207,58 @@ def load_profile() -> dict:
         "cover_letter": "",
         "date_format": "MM/DD/YYYY",
         "notes": "",
-    })
+    }
+
+
+def _lenient_like(template, value, bool_text: bool = True):
+    """Repair the shapes that crash callers (null, a list where text belongs, text where a list or
+    object belongs) without rewriting values that are merely unusual (a bool work authorization,
+    "6" years as text)."""
+    if isinstance(template, dict):
+        if not isinstance(value, dict):
+            return dict(template)
+        return {k: (_lenient_like(template[k], v, bool_text) if k in template else v) for k, v in value.items()}
+    if isinstance(template, list):
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [x.strip() for x in value.split(",") if x.strip()]
+        if isinstance(value, (list, tuple)):
+            return [x for x in value if isinstance(x, str) and x.strip()]
+        return list(template)
+    if isinstance(template, str):
+        if value is None:
+            return ""
+        if isinstance(value, (list, tuple)):
+            return " ".join(str(x).strip() for x in value if isinstance(x, (str, int, float)) and str(x).strip())
+        if isinstance(value, dict):
+            return template
+        if isinstance(value, bool):
+            return value if bool_text else template
+        if isinstance(value, (int, float)):
+            return str(value)
+        return value
+    if value is None or isinstance(value, (dict, list, tuple)):
+        return template
+    return value
+
+
+def normalize_profile(profile) -> dict:
+    """A profile whose known fields have the types the app relies on (see ``_lenient_like``)."""
+    if not isinstance(profile, dict):
+        return _profile_defaults()
+    d = _profile_defaults()
+    # work_authorization may be a yes/no bool (form_guard reads it either way); other text fields may not
+    return {k: (_lenient_like(d[k], v, bool_text=(k == "work_authorization")) if k in d else v)
+            for k, v in profile.items() if isinstance(k, str)}
+
+
+def load_profile() -> dict:
+    return normalize_profile(_load_json(get_data_dir() / "candidate_profile.json", _profile_defaults()))
 
 
 def save_profile(profile: dict):
-    _save_json(get_data_dir() / "candidate_profile.json", profile)
+    _save_json(get_data_dir() / "candidate_profile.json", normalize_profile(profile))
 
 
 # ── LLM Settings ──────────────────────────────────────────────────────────
@@ -234,8 +281,8 @@ def save_llm_settings(settings: dict):
 
 # ── App Settings ──────────────────────────────────────────────────────────
 
-def load_settings() -> dict:
-    return _load_json(get_data_dir() / "settings.json", {
+def _settings_defaults() -> dict:
+    return {
         "resume_path": "",
         "blocked_domains": [],
         "sensitive_data": {"email": ""},
@@ -244,7 +291,21 @@ def load_settings() -> dict:
         "data_dir": str(get_data_dir()),
         "telemetry_enabled": False,  # opt-in only
         "theme": "system",
-    })
+    }
+
+
+def normalize_settings(settings) -> dict:
+    """Settings whose known fields have the types the app relies on; a text field holding a bool,
+    a list or an object (e.g. ``resume_path: true``) falls back to its default."""
+    if not isinstance(settings, dict):
+        return _settings_defaults()
+    d = _settings_defaults()
+    return {k: (_lenient_like(d[k], v, bool_text=False) if k in d else v)
+            for k, v in settings.items() if isinstance(k, str)}
+
+
+def load_settings() -> dict:
+    return normalize_settings(_load_json(get_data_dir() / "settings.json", _settings_defaults()))
 
 
 def _vault():
@@ -277,12 +338,23 @@ def migrate_settings_secrets() -> bool:
     return False
 
 
+def _clamped_int(value, default: int, lo: int, hi: int) -> int:
+    try:
+        n = int(float(value)) if not isinstance(value, bool) else default
+    except (TypeError, ValueError, OverflowError):
+        n = default
+    return max(lo, min(n, hi))
+
+
 def save_settings(settings: dict):
+    normalized = normalize_settings(settings)
+    settings.clear()
+    settings.update(normalized)
     move_shared_password_to_vault(settings)
     if "max_failures" in settings:
-        settings["max_failures"] = max(1, min(int(settings["max_failures"]), 50))
+        settings["max_failures"] = _clamped_int(settings["max_failures"], 8, 1, 50)
     if "stagger_delay" in settings:
-        settings["stagger_delay"] = max(0, min(int(settings["stagger_delay"]), 300))
+        settings["stagger_delay"] = _clamped_int(settings["stagger_delay"], 5, 0, 300)
     if "blocked_domains" in settings:
         settings["blocked_domains"] = [
             str(d).strip() for d in settings["blocked_domains"]

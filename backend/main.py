@@ -328,6 +328,13 @@ def _recover_stale_jobs():
         _log.info(f"Migrated {migrated} legacy 'applied' jobs to 'submitted_unconfirmed'")
 
 
+def _bstr(body: dict, key: str, default: str = "") -> str:
+    """A request-body text field, stripped; a missing, null or non-text value reads as ``default``
+    so a bad payload gets the endpoint's own 400 instead of a 500."""
+    v = body.get(key) if isinstance(body, dict) else None
+    return v.strip() if isinstance(v, str) else default
+
+
 def _api_error(code: str, message: str, status_code: int = 400) -> JSONResponse:
     """Return a structured error response."""
     return JSONResponse(
@@ -697,7 +704,7 @@ async def local_models_overview():
 
 def _local_base(url: str) -> str:
     from urllib.parse import urlparse
-    u = urlparse((url or "").strip())
+    u = urlparse(url.strip() if isinstance(url, str) else "")
     if u.scheme not in ("http", "https") or not u.hostname:
         raise HTTPException(400, "base_url must be an http(s) URL")
     return f"{u.scheme}://{u.netloc}".rstrip("/")
@@ -706,7 +713,7 @@ def _local_base(url: str) -> str:
 @app.post("/local-models/pull")
 async def local_models_pull(body: dict):
     _, detect, _, pull = _local_models()
-    model = str(body.get("model") or "").strip()
+    model = _bstr(body, "model")
     if not pull.valid_model(model):
         raise HTTPException(400, "Invalid model name")
     base = _local_base(body.get("base_url") or detect.default_endpoints()["ollama"])
@@ -728,7 +735,7 @@ async def local_models_pull_status(job_id: str):
 async def local_models_use(body: dict):
     """Point the built-in agent at a local model and select it (no API key, no subscription)."""
     runtime = str(body.get("runtime") or "ollama")
-    model = str(body.get("model") or "").strip()
+    model = _bstr(body, "model")
     if not model or len(model) > 200:
         raise HTTPException(400, "model is required")
     base = _local_base(body.get("base_url") or "")
@@ -804,7 +811,7 @@ async def quickstart_search(body: dict):
     from core.searches import store as search_store
     try:
         resume = None
-        if (body.get("resume_path") or "").strip():
+        if _bstr(body, "resume_path"):
             resume = search_store.add_resume({"path": body["resume_path"], "name": "My resume"})
             settings = load_settings()
             if not (settings.get("resume_path") or "").strip():
@@ -849,7 +856,8 @@ async def get_tracker():
 async def review_jobs(body: dict):
     """Review-first mode: approve jobs for applying, or skip them."""
     from core import jobs_store
-    urls = [u for u in (body.get("urls") or []) if isinstance(u, str)][:500]
+    raw_urls = body.get("urls")
+    urls = [u for u in (raw_urls if isinstance(raw_urls, list) else []) if isinstance(u, str)][:500]
     approve = bool(body.get("approve", True))
     n = 0
     for url in urls:
@@ -2130,8 +2138,8 @@ async def export_jobs_csv():
 @app.put("/jobs/status")
 async def update_job_status(body: dict):
     """Manually change a job's status."""
-    url = body.get("url", "").strip()
-    new_status = body.get("status", "").strip()
+    url = _bstr(body, "url")
+    new_status = _bstr(body, "status")
     if not url:
         return _api_error("missing_field", "Job URL is required", 400)
     if new_status == js.LEGACY_APPLIED:  # older clients
@@ -2161,7 +2169,7 @@ async def confirm_job_by_email(body: dict):
     ``evidence`` should identify the email (e.g. message id, sender domain, received_at),
     never its full body.
     """
-    url = (body.get("url") or "").strip()
+    url = _bstr(body, "url")
     evidence = body.get("evidence") or {}
     if not url or not isinstance(evidence, dict) or not evidence:
         return _api_error("missing_field", "url and evidence are required", 400)
@@ -2193,7 +2201,7 @@ async def add_job_manually(body: dict):
     from datetime import datetime, timezone
     from core.shared_config import read_jobs, write_jobs, validate_job_url
 
-    url = body.get("url", "").strip()
+    url = _bstr(body, "url")
     if not url:
         return _api_error("missing_field", "Job URL is required", 400)
     if not validate_job_url(url):
@@ -2205,12 +2213,12 @@ async def add_job_manually(body: dict):
 
     jobs[url] = {
         "url": url,
-        "title": body.get("title", "").strip() or "Manually Added",
-        "company": body.get("company", "").strip() or "",
-        "location": body.get("location", "").strip() or "",
+        "title": _bstr(body, "title") or "Manually Added",
+        "company": _bstr(body, "company"),
+        "location": _bstr(body, "location"),
         "easy_apply": None,
         "status": "pending",
-        "source": body.get("source", "manual"),
+        "source": _bstr(body, "source") or "manual",
         "collected_at": datetime.now(timezone.utc).isoformat(),
         "submitted_at": None,
         "error": None,
@@ -2479,11 +2487,107 @@ def _resume_location_ok(resume_file: Path) -> bool:
     return False
 
 
+def _pdf_read_error(path: Path, e: Exception) -> str:
+    """A message a person can act on, instead of pdfminer's internals (or an empty string)."""
+    name = type(e).__name__
+    if path.is_dir():
+        return "That path is a folder, not a PDF file. Pick the resume file itself."
+    try:
+        size = path.stat().st_size
+        head = path.read_bytes()[:1024] if size else b""
+    except OSError as oe:
+        return f"Could not open the resume file: {oe.strerror or oe}"
+    if size == 0:
+        return "The resume file is empty (0 bytes). Export it again and pick the new file."
+    if "Password" in name or "Encrypt" in name or b"/Encrypt" in path.read_bytes()[-4096:]:
+        return "This PDF is password-protected. Export an unprotected copy (Print > Save as PDF) and pick that."
+    if b"%PDF" not in head:
+        kind = "a Word document or ZIP" if head.startswith(b"PK") else ("a web page" if b"<html" in head.lower() else "not a PDF")
+        return f"This file is named .pdf but is {kind}. Export your resume as a real PDF and pick that."
+    if "EOF" in str(e) or name in ("PSEOF", "PDFSyntaxError"):
+        return "This PDF looks damaged or incomplete (it may not have finished downloading). Export it again."
+    return f"Failed to read resume PDF: {e or name}"
+
+
+def _first_json_object(text: str):
+    dec = json.JSONDecoder()
+    i = text.find("{")
+    while i != -1:
+        try:
+            obj, _ = dec.raw_decode(text, i)
+            if isinstance(obj, dict):
+                return obj
+        except ValueError:
+            pass
+        i = text.find("{", i + 1)
+    return None
+
+
+def _coerce_like(template, value):
+    """``value`` in the type of ``template`` (the profile's current value), or None to skip it."""
+    if value is None:
+        return None
+    if isinstance(template, bool):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.strip().lower() in ("yes", "no", "true", "false"):
+            return value.strip().lower() in ("yes", "true")
+        return None
+    if isinstance(template, (int, float)):
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            return value
+        if isinstance(value, str):
+            import re as _re
+            m = _re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*(\+|k|K)?\s*(?:years?|yrs?)?\s*", value)
+            if m:
+                n = float(m.group(1)) * (1000 if m.group(2) in ("k", "K") else 1)
+                return int(n) if n.is_integer() else n
+        return None
+    if isinstance(template, str):
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            return str(value)
+        if isinstance(value, str):
+            return value
+        if isinstance(value, list) and all(isinstance(x, (str, int, float)) for x in value):
+            return " ".join(str(x).strip() for x in value if str(x).strip())
+        return None
+    if isinstance(template, list):
+        if isinstance(value, str):
+            return [value] if value.strip() else None
+        if isinstance(value, list):
+            return [str(x) for x in value if isinstance(x, (str, int, float)) and str(x).strip()]
+        return None
+    if isinstance(template, dict):
+        if not isinstance(value, dict):
+            return None
+        out = {}
+        for k, v in value.items():
+            c = _coerce_like(template[k], v) if k in template else (v if isinstance(v, (str, int, float, bool, list, dict)) else None)
+            if c is not None:
+                out[k] = c
+        return out
+    return value
+
+
+def _coerce_parsed_profile(parsed: dict, existing: dict) -> dict:
+    out = {}
+    for k, v in parsed.items():
+        if not isinstance(k, str):
+            continue
+        c = _coerce_like(existing[k], v) if k in existing else (v if v is not None else None)
+        if c is not None:
+            out[k] = c
+    return out
+
+
 # ── Profile: Parse Resume ─────────────────────────────────────────────────
 @app.post("/profile/parse-resume")
 async def parse_resume_to_profile():
     """Read the user's resume PDF and use the configured LLM to extract profile fields."""
-    import re as _re
 
     settings = load_settings()
     resume_path = settings.get("resume_path", "").strip()
@@ -2510,7 +2614,7 @@ async def parse_resume_to_profile():
     except PdfTooLarge as e:
         return {"success": False, "message": str(e)}
     except Exception as e:
-        return {"success": False, "message": f"Failed to read resume PDF: {e}"}
+        return {"success": False, "message": _pdf_read_error(resume_file, e)}
 
     # 2. Send to LLM for structured extraction
     llm_settings = load_llm_settings()
@@ -2562,12 +2666,13 @@ RESUME TEXT:
         response = await llm.ainvoke([UserMessage(content=prompt)])
         response_text = response.completion if hasattr(response, 'completion') else (response.content if hasattr(response, 'content') else str(response))
 
-        # Parse JSON from response
-        match = _re.search(r"\{.*\}", response_text, _re.DOTALL)
-        if not match:
+        # Parse JSON from response: the first complete JSON object, even inside ```json fences or
+        # followed by prose that itself contains braces ("fields like {phone} were missing").
+        if "{" not in response_text:
             return {"success": False, "message": "LLM did not return valid JSON. Try again."}
-
-        parsed_profile = json.loads(match.group())
+        parsed_profile = _first_json_object(response_text)
+        if parsed_profile is None:
+            raise json.JSONDecodeError("no JSON object", response_text, 0)
 
         # Normalize skills: LLM sometimes returns {technical_skills: [...], soft_skills: [...]}
         if isinstance(parsed_profile.get("skills"), dict):
@@ -2580,8 +2685,11 @@ RESUME TEXT:
                     flat_skills.append(v)
             parsed_profile["skills"] = flat_skills
 
-        # Merge with existing profile — overwrite with parsed values when they're non-empty
+        # Merge with existing profile — overwrite with parsed values when they're non-empty.
+        # Model output is coerced to the profile's own shape first: "address": "Springfield, IL" must not
+        # replace the address object, a list name must not reach code that calls .strip() on it.
         existing = load_profile()
+        parsed_profile = _coerce_parsed_profile(parsed_profile, existing)
         for key, value in parsed_profile.items():
             if key not in existing:
                 existing[key] = value
@@ -2634,6 +2742,10 @@ RESUME TEXT:
 
 
 # ── Setup Status ──────────────────────────────────────────────────────────
+def _txt(v) -> str:
+    return v.strip() if isinstance(v, str) else ""
+
+
 @app.get("/setup/status")
 async def get_setup_status():
     """Check which onboarding steps are complete."""
@@ -2641,32 +2753,32 @@ async def get_setup_status():
     llm = load_llm_settings()
     settings = load_settings()
 
-    profile_done = bool(profile.get("name", "").strip())
+    profile_done = bool(_txt(profile.get("name", "")))
     llm_done = False
     provider = llm.get("provider", "")
     if provider == "openai":
-        llm_done = bool((llm.get("openai") or {}).get("api_key", "").strip())
+        llm_done = bool(_txt((llm.get("openai") or {}).get("api_key", "")))
     elif provider == "anthropic":
-        llm_done = bool((llm.get("anthropic") or {}).get("api_key", "").strip())
+        llm_done = bool(_txt((llm.get("anthropic") or {}).get("api_key", "")))
     elif provider == "bedrock":
         bedrock = llm.get("bedrock") or {}
         if bedrock.get("auth_mode") == "keys":
-            llm_done = bool(bedrock.get("access_key", "").strip() and bedrock.get("secret_key", "").strip())
+            llm_done = bool(_txt(bedrock.get("access_key", "")) and _txt(bedrock.get("secret_key", "")))
         else:
             # Profile mode — considered configured even with default profile
             llm_done = True
     elif provider == "openrouter":
-        llm_done = bool((llm.get("openrouter") or {}).get("api_key", "").strip())
+        llm_done = bool(_txt((llm.get("openrouter") or {}).get("api_key", "")))
     elif provider == "ollama":
         ollama = llm.get("ollama") or {}
-        llm_done = bool(ollama.get("base_url", "").strip())
+        llm_done = bool(_txt(ollama.get("base_url", "")))
     elif provider == "gemini":
-        llm_done = bool((llm.get("gemini") or {}).get("api_key", "").strip())
+        llm_done = bool(_txt((llm.get("gemini") or {}).get("api_key", "")))
     elif provider == "openai_compatible":
         compat = llm.get("openai_compatible") or {}
-        llm_done = bool(compat.get("base_url", "").strip())
+        llm_done = bool(_txt(compat.get("base_url", "")))
 
-    resume_done = bool(settings.get("resume_path", "").strip())
+    resume_done = bool(_txt(settings.get("resume_path", "")))
     onboarding_completed = settings.get("onboarding_completed", False)
 
     # Check Chromium
@@ -2871,8 +2983,11 @@ async def tailor_resumes(body: dict):
     from resume.tailor import tailor_resume
     from core.shared_config import read_jobs, update_job
 
-    job_urls = body.get("job_urls", [])
-    options = body.get("options", {"skills": True, "overview": True, "experience": True, "title": False})
+    raw = body.get("job_urls")
+    job_urls = [u for u in raw if isinstance(u, str) and u.strip()] if isinstance(raw, list) else []
+    options = body.get("options")
+    if not isinstance(options, dict):
+        options = {"skills": True, "overview": True, "experience": True, "title": False}
 
     if not job_urls:
         return _api_error("missing_field", "job_urls is required", 400)
@@ -2911,8 +3026,8 @@ async def refine_tailored_resume(body: dict):
     from resume.tailor import tailor_resume
     from core.shared_config import read_jobs, update_job
 
-    job_url = body.get("job_url", "")
-    instruction = body.get("instruction", "")
+    job_url = _bstr(body, "job_url")
+    instruction = _bstr(body, "instruction")
 
     if not job_url:
         return _api_error("missing_field", "job_url is required", 400)
@@ -2923,7 +3038,9 @@ async def refine_tailored_resume(body: dict):
         return _api_error("not_found", "Job not found", 404)
 
     description = job.get("description", "")
-    options = body.get("options", {"skills": True, "overview": True, "experience": True, "title": False})
+    options = body.get("options")
+    if not isinstance(options, dict):
+        options = {"skills": True, "overview": True, "experience": True, "title": False}
 
     try:
         result = await tailor_resume(job_url, description + f"\n\nADDITIONAL INSTRUCTION: {instruction}", options)
@@ -2937,7 +3054,7 @@ async def refine_tailored_resume(body: dict):
 async def get_tailored_by_url(body: dict):
     """Get tailored resume content by job URL."""
     from resume.tailor import get_tailored_content
-    job_url = body.get("job_url", "")
+    job_url = _bstr(body, "job_url")
     if not job_url:
         return _api_error("missing_field", "job_url is required", 400)
     result = get_tailored_content(job_url)
@@ -2979,9 +3096,9 @@ async def delete_tailored(url_hash: str):
 @app.post("/cover-letter/generate")
 async def generate_cover_letter(body: dict):
     """Generate a tailored cover letter using LLM based on job description + profile."""
-    job_description = body.get("job_description", "").strip()
-    job_title = body.get("job_title", "")
-    company = body.get("company", "")
+    job_description = _bstr(body, "job_description")
+    job_title = _bstr(body, "job_title")
+    company = _bstr(body, "company")
 
     if not job_description:
         return _api_error("missing_field", "Job description is required", 400)

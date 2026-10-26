@@ -427,6 +427,31 @@ def _s(v: Any) -> str:
     return str(v).strip()
 
 
+# Labels about someone or something other than the candidate ("Referrer's name", "Emergency contact
+# phone", "Company name", "Reference email"). The candidate's own name/email/phone must never go there.
+_OTHER_PARTY_RE = re.compile(
+    r"\b(referr\w*|referee|references?|emergency|manager\w*|supervisor\w*|recruiter\w*|spouse|partner|"
+    r"parents?|guardian|relatives?|kin|friend|colleague|coworker|contact person|hiring|employers?|company|"
+    r"companies|school|university|college|institution|organi[sz]ation|landlord|business|agency|firm)\b", re.I)
+# "Years of experience" alone is the candidate's total; "years of Kubernetes experience" /
+# "years of experience with Python" is a per-skill question the total does not answer truthfully.
+_GENERIC_YEARS_RE = re.compile(
+    r"^(?:total |overall )?(?:number of |how many )?years? of (?:total |overall |professional |relevant |work |"
+    r"industry |full time |full-time |paid )?(?:work )?experience(?: do you have| you have)?(?: in total| total| overall)?$"
+    r"|^how many years(?: of (?:total |overall |professional |relevant |work |industry )?(?:work )?experience)?"
+    r"(?: do you have| have you worked)?(?: in total| total| overall)?$", re.I)
+_PERSONAL_RULES = {"first", "last", "name", "email", "phone", "linkedin", "github", "website", "pronouns"}
+
+
+def _phone_answer(p: dict) -> str:
+    phone = _s(p.get("phone"))
+    if not phone:
+        return ""
+    if phone.startswith("+") or phone.startswith("00"):
+        return phone  # already international: "+1 555-0100" must not become "+1+1 555-0100"
+    return f"{_s(p.get('phone_country_code'))}{phone}"
+
+
 def _profile_answer(label: str, profile: dict, context: dict) -> str | None:
     p = _d(profile)
     name = " ".join(_s(p.get("name")).split())
@@ -435,39 +460,55 @@ def _profile_answer(label: str, profile: dict, context: dict) -> str | None:
     sal = _d(p.get("salary_expectation"))
     context = _d(context)
     l = normalize(label)
-    rules: list[tuple[str, Any]] = [
-        (r"\bfirst name\b|\bgiven name\b", first),
-        (r"\blast name\b|\bsurname\b|\bfamily name\b", last.strip()),
-        (r"\b(full |legal )?name\b", name),
-        (r"\be-?mail\b", p.get("email")),
-        (r"\bphone\b|\bmobile\b|\btelephone\b", (f"{_s(p.get('phone_country_code'))}{_s(p.get('phone'))}" if _s(p.get("phone")) else "")),
-        (r"\blinkedin\b", p.get("linkedin") or p.get("linkedin_url")),
-        (r"\bgithub\b", p.get("github")),
-        (r"\b(website|portfolio|personal site)\b", p.get("website") or p.get("portfolio") or p.get("github")),
-        (r"\bsponsor", _yes_no(p.get("visa_sponsorship_needed"))),
-        (r"\b(authori[sz]ed|eligible|legally (able|permitted)) to work\b|\bwork authori[sz]ation\b",
+    other_party = bool(_OTHER_PARTY_RE.search(l))
+    rules: list[tuple[str, str, Any]] = [
+        ("cc", r"\b(phone |dialing |calling )?country code\b|\bdial(ing)? code\b", p.get("phone_country_code")),
+        ("first", r"\bfirst name\b|\bgiven name\b", first),
+        ("last", r"\blast name\b|\bsurname\b|\bfamily name\b", last.strip()),
+        ("company", r"\b(current|most recent|present) (company|employer)\b", p.get("current_company")),
+        ("school", r"\b(school|university|college)\b", _d(p.get("education")).get("school")),
+        ("name", r"\b(full |legal )?name\b", name),
+        ("email", r"\be-?mail\b", p.get("email")),
+        ("phone", r"\bphone\b|\bmobile\b|\btelephone\b", _phone_answer(p)),
+        ("linkedin", r"\blinkedin\b", p.get("linkedin") or p.get("linkedin_url")),
+        ("github", r"\bgithub\b", p.get("github")),
+        ("website", r"\b(website|portfolio|personal site)\b", p.get("website") or p.get("portfolio") or p.get("github")),
+        ("sponsor", r"\bsponsor", _yes_no(p.get("visa_sponsorship_needed"))),
+        ("auth", r"\b(authori[sz]ed|eligible|legally (able|permitted)) to work\b|\bwork authori[sz]ation\b",
          _yes_no(p.get("work_authorization")) or p.get("work_authorization")),
-        (r"\brelocat", _yes_no(p.get("willing_to_relocate"))),
-        (r"\bcity\b", addr.get("city")),
-        (r"\b(state|province|region)\b", addr.get("state")),
-        (r"\b(zip|postal)\b", addr.get("zip")),
-        (r"\bcountry\b", addr.get("country")),
-        (r"\b(location|where are you based|current address)\b",
+        ("relocate", r"\brelocat", _yes_no(p.get("willing_to_relocate"))),
+        # Before "country": "Country of citizenship" is the nationality, not the home address.
+        ("nationality", r"\bnationality\b|\bcitizenship\b", p.get("nationality")),
+        ("city", r"\bcity\b", addr.get("city")),
+        ("state", r"\b(state|province|region)\b", addr.get("state")),
+        ("zip", r"\b(zip|postal)\b", addr.get("zip")),
+        ("country", r"\bcountry\b", addr.get("country")),
+        ("location", r"\b(location|where are you based|current address)\b",
          ", ".join(x for x in (addr.get("city"), addr.get("state")) if x)),
-        (r"\b(current|most recent) (title|role|position)\b", p.get("current_role")),
-        (r"\b(current|most recent) (company|employer)\b", p.get("current_company")),
-        (r"\byears of (professional )?experience\b|\bhow many years\b", p.get("years_of_experience")),
-        (r"\b(notice period|start date|when can you start|availability|date available|available (to start|from))\b", p.get("notice_period")),
-        (r"\b(salary|compensation|pay) (expectation|requirement|range)s?\b|\bdesired (salary|pay)\b",
+        ("role", r"\b(current|most recent) (title|role|position)\b", p.get("current_role")),
+        ("years", r"\byears of (professional )?experience\b|\bhow many years\b",
+         # 0 is the untouched form default: an experienced person must not claim "0 years".
+         # The agent works it out from the resume instead (a new grad's resume says 0 truthfully).
+         (p.get("years_of_experience") if _GENERIC_YEARS_RE.match(l) and _s(p.get("years_of_experience")) not in ("0", "0.0") else None)),
+        ("notice", r"\b(notice period|start date|when can you start|availability|date available|available (to start|from))\b", p.get("notice_period")),
+        ("salary", r"\b(salary|compensation|pay) (expectation|requirement|range)s?\b|\bdesired (salary|pay)\b",
          (f"{sal.get('min')}" if sal.get("min") else None)),
-        (r"\bhow did you (hear|find|learn)\b|\bsource\b|\breferr(ed|al) source\b", context.get("source")),
-        (r"\b(school|university|college)\b", _d(p.get("education")).get("school")),
-        (r"\bdegree\b", _d(p.get("education")).get("degree")),
-        (r"\bnationality\b|\bcitizenship\b", p.get("nationality")),
-        (r"\bpronouns?\b", p.get("pronouns")),
+        # Not a bare "source": "Describe your open source contributions" is an essay, not "LinkedIn".
+        ("source", r"\bhow did you (hear|find|learn)\b|\bwhere did you (hear|find|see)\b|\breferr(ed|al) source\b"
+                   r"|^(lead |candidate |job |application )?source$", context.get("source")),
+        ("degree", r"\bdegree\b", _d(p.get("education")).get("degree")),
+        ("pronouns", r"\bpronouns?\b", p.get("pronouns")),
     ]
-    for pattern, value in rules:
-        if re.search(pattern, l) and _s(value):
+    for rule, pattern, value in rules:
+        if not re.search(pattern, l):
+            continue
+        if rule in _PERSONAL_RULES and other_party:
+            return None   # someone else's details: the agent asks or leaves it for a person
+        if rule == "years" and not _GENERIC_YEARS_RE.match(l):
+            return None   # per-skill years: composed from the resume, never the total
+        if rule == "cc" and not _s(value):
+            return None
+        if _s(value):
             return _s(value)
     return None
 

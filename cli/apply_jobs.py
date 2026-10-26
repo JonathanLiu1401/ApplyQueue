@@ -35,7 +35,7 @@ try:
     from core.agent_logger import on_step as _agent_on_step, on_done as _agent_on_done, log_run_start as _agent_log_start
     from core import job_status as js
     from core.apply_policy import apply_policy_text
-    from core.llm_factory import agent_timeouts
+    from core.llm_factory import agent_timeouts, is_llm_auth_error
     from core.credential_vault import CredentialVault
     from core.outcome import decide_outcome
 except ImportError:
@@ -53,7 +53,7 @@ except ImportError:
     from backend.core.agent_logger import on_step as _agent_on_step, on_done as _agent_on_done, log_run_start as _agent_log_start
     from backend.core import job_status as js
     from backend.core.apply_policy import apply_policy_text
-    from backend.core.llm_factory import agent_timeouts
+    from backend.core.llm_factory import agent_timeouts, is_llm_auth_error
     from backend.core.credential_vault import CredentialVault
     from backend.core.outcome import decide_outcome
 
@@ -147,6 +147,12 @@ def _is_linkedin(url: str) -> bool:
     from urllib.parse import urlparse
     host = (urlparse(url).hostname or "").lower()
     return host == "linkedin.com" or host.endswith(".linkedin.com")
+
+
+LLM_AUTH_STATUS = "llm_auth"
+LLM_AUTH_REASON = "llm_key_rejected"
+LLM_AUTH_MESSAGE = ("The AI provider rejected the API key (revoked, expired, wrong or out of credit). "
+                    "Stopping this run; fix the key in Settings and start again.")
 
 
 async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[str], easy_apply: bool, worker_id: int, resume_path_override: str | None = None) -> str:
@@ -480,6 +486,11 @@ async def _apply_claimed(job, profile, qa, applied_labels, easy_apply, worker_id
             print(f"  🙋 [W{worker_id}] Needs a person: {title} at {company} — {outcome.reason[:100]}")
         else:
             error_msg = next((e for e in reversed(result.errors()) if e), None)
+            if error_msg and is_llm_auth_error(error_msg) and not _submit_was_clicked(url):
+                # Not this job's fault: put it back in the queue and stop the run (see worker()).
+                await save_job_status(url, "pending", LLM_AUTH_REASON)
+                print(f"  🔑 [W{worker_id}] {LLM_AUTH_MESSAGE} ({title} at {company} stays in the queue)")
+                return LLM_AUTH_STATUS
             error_msg = error_msg or ("Agent reported failure" if not agent_claimed else outcome.reason)
             await save_job_status(url, js.FAILED, error_msg[:2000], **evidence_fields)
             print(f"  ❌ [W{worker_id}] Failed: {title} at {company} — {error_msg[:100]}")
@@ -487,6 +498,10 @@ async def _apply_claimed(job, profile, qa, applied_labels, easy_apply, worker_id
 
     except Exception as e:
         error_str = str(e)
+        if is_llm_auth_error(error_str) and not _submit_was_clicked(url):
+            await save_job_status(url, "pending", LLM_AUTH_REASON)
+            print(f"  🔑 [W{worker_id}] {LLM_AUTH_MESSAGE} ({title} at {company} stays in the queue)")
+            return LLM_AUTH_STATUS
         retriable = "security token" in error_str.lower() or "expired" in error_str.lower()
         if retriable and job.get("_retries", 0) < 1 and not _submit_was_clicked(url):
             job["_retries"] = job.get("_retries", 0) + 1
@@ -528,6 +543,8 @@ async def worker(name: str, worker_id: int, queue: asyncio.Queue, profile: dict,
         if cancel_flag and cancel_flag.get("cancel_requested"):
             print(f"  🛑 [{name}] Stop requested — halting")
             break
+        if stats.get(LLM_AUTH_STATUS):
+            break  # the model key was rejected: every remaining job would fail the same way
         try:
             job = queue.get_nowait()
         except asyncio.QueueEmpty:

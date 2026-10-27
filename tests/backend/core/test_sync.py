@@ -568,7 +568,7 @@ def test_remote_rewound_by_force_push_is_restored(world):
     ("fatal: unable to access 'https://github.com/x/': Failed to connect to 127.0.0.1 port 9", gitrepo.NetworkError),
 ])
 def test_git_auth_failures_are_not_mistaken_for_offline(tmp_path, monkeypatch, stderr, kind):
-    monkeypatch.setattr(gitrepo.subprocess, "run",
+    monkeypatch.setattr(gitrepo, "run_killing_tree",
                         lambda *a, **k: subprocess.CompletedProcess(a[0], 128, "", stderr))
     with pytest.raises(gitrepo.GitError) as ei:
         gitrepo.GitRepo(tmp_path).run("fetch", "--quiet", "origin")

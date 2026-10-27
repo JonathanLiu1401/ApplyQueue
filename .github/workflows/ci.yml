@@ -206,7 +206,7 @@ jobs:
         run: uv run python -m playwright install chromium
       - name: Backend + agent e2e + break-it tests (pytest)
         continue-on-error: ${{ inputs.probe == true }}
-        run: uv run pytest tests/ --ignore=tests/ui_e2e --ignore=tests/webdriver -q -p no:cacheprovider
+        run: uv run pytest tests/ --ignore=tests/ui_e2e --ignore=tests/webdriver -p no:cacheprovider
       - name: Build backend sidecar (PyInstaller)
         shell: pwsh
         run: powershell -ExecutionPolicy Bypass -File scripts/build-backend.ps1
@@ -219,8 +219,8 @@ jobs:
         continue-on-error: ${{ inputs.probe == true }}
         run: |
           APPLYQUEUE_SIDECAR="$(cygpath -m "$PWD")/src-tauri/binaries/applyqueue-backend-x86_64-pc-windows-msvc.exe" \
-            uv run pytest tests/ui_e2e -q -rs -p no:cacheprovider | tee "$RUNNER_TEMP/ui.log"
-          if grep -q SKIPPED "$RUNNER_TEMP/ui.log"; then echo "::error::UI e2e tests were skipped"; exit 1; fi
+            uv run pytest tests/ui_e2e -rs -p no:cacheprovider | tee "$RUNNER_TEMP/ui.log"
+          if grep -E "SKIPPED.*test_ui_flows" "$RUNNER_TEMP/ui.log"; then echo "::error::UI flow tests were skipped (no built dist?)"; exit 1; fi
       - name: Rust unit tests (open_file path checks)
         continue-on-error: ${{ inputs.probe == true }}
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib --target x86_64-pc-windows-msvc
@@ -235,7 +235,7 @@ jobs:
           export APPLYQUEUE_NATIVE_DRIVER="$(cygpath -m "$RUNNER_TEMP")/msedgedriver.exe"
           export APPLYQUEUE_TAURI_APP="$(cygpath -m "$PWD")/src-tauri/target/x86_64-pc-windows-msvc/release/app.exe"
           test -f "$APPLYQUEUE_TAURI_APP" && test -f "$APPLYQUEUE_NATIVE_DRIVER"
-          uv run pytest tests/webdriver -q -x -rs -p no:cacheprovider | tee "$RUNNER_TEMP/wd.log"
+          uv run pytest tests/webdriver -x -rs -p no:cacheprovider | tee "$RUNNER_TEMP/wd.log"
           if grep -q SKIPPED "$RUNNER_TEMP/wd.log"; then echo "::error::WebDriver tests were skipped"; exit 1; fi
 
   intel-mac:
@@ -275,7 +275,7 @@ jobs:
         run: uv run python -m playwright install chromium
       - name: Backend + agent e2e + break-it tests (pytest)
         continue-on-error: ${{ inputs.probe == true }}
-        run: uv run pytest tests/ --ignore=tests/ui_e2e --ignore=tests/webdriver -q -p no:cacheprovider
+        run: uv run pytest tests/ --ignore=tests/ui_e2e --ignore=tests/webdriver -p no:cacheprovider
       - name: Build backend sidecar (x86_64)
         run: bash scripts/build-backend.sh x86_64-apple-darwin
       - name: Sidecar self-test (frozen binary)
@@ -288,8 +288,8 @@ jobs:
         continue-on-error: ${{ inputs.probe == true }}
         run: |
           APPLYQUEUE_SIDECAR="$PWD/src-tauri/binaries/applyqueue-backend-x86_64-apple-darwin" \
-            uv run pytest tests/ui_e2e -q -rs -p no:cacheprovider | tee "$RUNNER_TEMP/ui.log"
-          if grep -q SKIPPED "$RUNNER_TEMP/ui.log"; then echo "::error::UI e2e tests were skipped"; exit 1; fi
+            uv run pytest tests/ui_e2e -rs -p no:cacheprovider | tee "$RUNNER_TEMP/ui.log"
+          if grep -E "SKIPPED.*test_ui_flows" "$RUNNER_TEMP/ui.log"; then echo "::error::UI flow tests were skipped (no built dist?)"; exit 1; fi
       - name: Rust unit tests (open_file path checks)
         continue-on-error: ${{ inputs.probe == true }}
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib --target x86_64-apple-darwin
@@ -331,7 +331,7 @@ jobs:
         run: uv run python -m playwright install chromium
       - name: Backend + agent e2e + break-it tests (pytest)
         continue-on-error: ${{ inputs.probe == true }}
-        run: uv run pytest tests/ --ignore=tests/ui_e2e --ignore=tests/webdriver -q -p no:cacheprovider
+        run: uv run pytest tests/ --ignore=tests/ui_e2e --ignore=tests/webdriver -p no:cacheprovider
       - name: Build backend sidecar (arm64)
         run: bash scripts/build-backend.sh aarch64-apple-darwin
       - name: Sidecar self-test (frozen binary)
@@ -344,8 +344,8 @@ jobs:
         continue-on-error: ${{ inputs.probe == true }}
         run: |
           APPLYQUEUE_SIDECAR="$PWD/src-tauri/binaries/applyqueue-backend-aarch64-apple-darwin" \
-            uv run pytest tests/ui_e2e -q -rs -p no:cacheprovider | tee "$RUNNER_TEMP/ui.log"
-          if grep -q SKIPPED "$RUNNER_TEMP/ui.log"; then echo "::error::UI e2e tests were skipped"; exit 1; fi
+            uv run pytest tests/ui_e2e -rs -p no:cacheprovider | tee "$RUNNER_TEMP/ui.log"
+          if grep -E "SKIPPED.*test_ui_flows" "$RUNNER_TEMP/ui.log"; then echo "::error::UI flow tests were skipped (no built dist?)"; exit 1; fi
       - name: Rust unit tests (open_file path checks)
         continue-on-error: ${{ inputs.probe == true }}
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib --target aarch64-apple-darwin

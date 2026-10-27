@@ -11,6 +11,49 @@ import shutil
 import subprocess
 from pathlib import Path
 
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """Kill a process and everything it started (git -> ssh / git-remote-https / hook scripts)."""
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True, timeout=15,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        else:
+            os.killpg(proc.pid, 9)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        proc.kill()
+    except OSError:
+        pass
+
+
+def run_killing_tree(cmd: list[str], *, cwd: str, env: dict, timeout: float) -> subprocess.CompletedProcess:
+    """``subprocess.run(capture_output=True, text=True, timeout=...)`` that also kills children.
+
+    ``subprocess.run`` kills only the direct child on timeout. On Windows it then waits for the
+    output pipes to close, and a grandchild that holds them (a stalled hook, ssh, a credential
+    helper) keeps it waiting for as long as the stall lasts, so a 2 s timeout became 30 s.
+    """
+    kw = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0) | subprocess.CREATE_NEW_PROCESS_GROUP} \
+        if os.name == "nt" else {"start_new_session": True}
+    proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", **kw)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as e:
+        _kill_tree(proc)
+        try:
+            e.output, e.stderr = proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            for f in (proc.stdout, proc.stderr):
+                try:
+                    f.close()
+                except OSError:
+                    pass
+        raise
+    return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+
 AUTHOR = ("ApplyQueue", "applyqueue@users.noreply.invalid")
 
 
@@ -75,10 +118,9 @@ class GitRepo:
         if not git:
             raise GitError("git is not installed. Install git (macOS: xcode-select --install) to use sync.")
         try:
-            p = subprocess.run([git, "-c", "core.autocrlf=false", "-c", "core.quotepath=false",
-                                "-c", "init.defaultBranch=main", *args],
-                               cwd=str(cwd or self.path), env=self._env(), capture_output=True, text=True,
-                               encoding="utf-8", errors="replace", timeout=timeout)
+            p = run_killing_tree([git, "-c", "core.autocrlf=false", "-c", "core.quotepath=false",
+                                  "-c", "init.defaultBranch=main", *args],
+                                 cwd=str(cwd or self.path), env=self._env(), timeout=timeout)
         except subprocess.TimeoutExpired as e:
             # A stalled connection (Wi-Fi drop mid-push, captive portal) hangs git rather than
             # failing it. Treat it as offline so the commit stays queued for the next sync.
@@ -156,7 +198,12 @@ class GitRepo:
         if not self.has_head():
             self.run("reset", "--quiet", "--hard", ref)
             return []
-        p = self.run("merge", "--no-edit", "--quiet", "--allow-unrelated-histories", ref, check=False)
+        # No rename detection: every file here is its own key (locks, sessions), and the lock
+        # files are near-identical JSON, so "released X, claimed Y" would read as a rename and
+        # carry the other side's change to X onto Y (a resurrected or misattributed lock).
+        p = self.run("merge", "--no-edit", "--quiet", "--allow-unrelated-histories", "-X", "no-renames",
+                     "-X", "find-renames=101%",  # ort (git 2.47) still pairs renames with no-renames alone
+                     ref, check=False)
         if p.returncode == 0:
             return []
         out = self.run("diff", "--name-only", "--diff-filter=U").stdout.split()

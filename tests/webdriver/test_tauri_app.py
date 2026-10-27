@@ -94,7 +94,13 @@ def app(tmp_path):
                 break
             time.sleep(0.2)
         caps = {"capabilities": {"alwaysMatch": {"tauri:options": {"application": str(Path(APP).resolve())}}}}
-        sid = _req("POST", f"{WD}/session", caps, timeout=120)["value"]["sessionId"]
+        try:
+            sid = _req("POST", f"{WD}/session", caps, timeout=120)["value"]["sessionId"]
+        except urllib.error.HTTPError as e:   # the driver's JSON error says why (app crashed, version, ...)
+            body = e.read().decode(errors="replace")[:3000]
+            log.flush()
+            raise AssertionError(f"new session failed: HTTP {e.code}\n{body}\n--- tauri-driver ---\n"
+                                 + (tmp_path / "tauri-driver.log").read_text(errors="replace")[-3000:]) from None
         s = Session(sid)
         try:
             yield s, data

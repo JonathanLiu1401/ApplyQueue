@@ -88,6 +88,36 @@ def test_corrupt_memory_db_is_quarantined_and_recreated(tmp_path, garbage):
     assert any(x.startswith("memory_store.db-wal.corrupt-") for x in moved)
 
 
+def test_connect_closes_the_handle_when_the_file_is_not_a_database(tmp_path, monkeypatch):
+    """Windows can't rename a file with an open handle, so a failed open must not leak one."""
+    from backend.memory import sqlite_util
+    db = tmp_path / "memory_store.db"
+    # A valid header passes the pre-check, so SQLite itself opens it and fails.
+    db.write_bytes(b"SQLite format 3\x00" + b"\xff" * 4080)
+    opened = []
+    real_connect = sqlite3.connect
+
+    def tracking_connect(*a, **kw):
+        conn = real_connect(*a, **kw)
+        closed = {"v": False}
+
+        class Tracked:
+            row_factory = None
+
+            def execute(self, *x, **y):
+                return conn.execute(*x, **y)
+
+            def close(self):
+                closed["v"] = True
+                conn.close()
+        opened.append(closed)
+        return Tracked()
+    monkeypatch.setattr(sqlite_util.sqlite3, "connect", tracking_connect)
+    with pytest.raises(sqlite3.DatabaseError):
+        sqlite_util.connect(db)
+    assert opened and all(c["v"] for c in opened)
+
+
 def test_locked_memory_db_waits_then_works(tmp_path, monkeypatch):
     MemoryStore, _ = _stores()
     db = tmp_path / "memory_store.db"

@@ -222,3 +222,88 @@ def test_lock_from_a_device_with_a_fast_clock_does_not_block_for_a_year(world, m
     assert world.use("laptop", kind="git").try_named_lock("search-s_2", 600)["ok"]
     now[0] -= 120
     assert world.use("desktop", kind="git").try_named_lock("search-s_2", 600)["ok"] is False
+
+
+# ── a timed-out git must not wait for its children ──
+def test_timeout_kills_children_that_hold_the_output_pipes(tmp_path):
+    """A stalled hook / ssh child keeps git's stdout open. The timeout must still return promptly
+    (subprocess.run waits for those pipes on Windows) and must not leave the child running."""
+    pidfile = tmp_path / "child.pid"
+    child = f"import os,time; open({str(pidfile)!r},'w').write(str(os.getpid())); time.sleep(60)"
+    parent = f"import subprocess,sys,time; subprocess.Popen([sys.executable,'-c',{child!r}]); time.sleep(60)"
+    t0 = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        gitrepo.run_killing_tree([sys.executable, "-c", parent], cwd=str(tmp_path), env=dict(os.environ), timeout=3)
+    assert time.monotonic() - t0 < 20
+    for _ in range(50):
+        if pidfile.exists() and pidfile.read_text():
+            break
+        time.sleep(0.1)
+    pid = int(pidfile.read_text())
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and _alive(pid):
+        time.sleep(0.2)
+    assert not _alive(pid), "the grandchild survived the timeout"
+
+
+def _alive(pid: int) -> bool:
+    if os.name == "nt":
+        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True).stdout
+        return str(pid) in out
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    try:   # a zombie (killed, not yet reaped by init) is not running
+        with open(f"/proc/{pid}/stat") as f:
+            return f.read().split(")")[-1].split()[0] != "Z"
+    except OSError:
+        return True
+
+
+# ── lock files are independent keys: a merge must never treat one as a rename of another ──
+def test_merge_does_not_pair_a_released_lock_with_a_new_one_as_a_rename(tmp_path):
+    """Lock files are near-identical JSON. With git's rename detection on, "device A released
+    lock X and claimed lock Y" looks like a rename X -> Y, and device B's change to X is carried
+    onto Y. Then a lock is resurrected or rewritten under the wrong job."""
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "--quiet", "--bare", "-b", "main", str(remote)], check=True)
+    a, b = gitrepo.GitRepo(tmp_path / "a"), gitrepo.GitRepo(tmp_path / "b")
+
+    def lock(key, dev):
+        return json.dumps({"job_key": key, "worker": f"{dev}-worker", "device": dev,
+                           "claimed_at": "2026-10-26T10:00:00+00:00", "ttl_sec": 7200}, indent=2) + "\n"
+
+    def write(repo, rel, text):
+        p = repo.path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+
+    a.path.mkdir()
+    a.run("init", "--quiet", "-b", "main")
+    a.run("remote", "add", "origin", str(remote))
+    write(a, "locks/jobs.lever.co-1111111111111111.json", lock("jobs.lever.co-1111111111111111", "laptop"))
+    a.commit_all("lock x")
+    a.push()
+    b.path.mkdir()
+    b.run("init", "--quiet", "-b", "main")
+    b.run("remote", "add", "origin", str(remote))
+    b.fetch()
+    assert b.merge_remote() == []
+    # A: release X, claim Y (one push)
+    (a.path / "locks/jobs.lever.co-1111111111111111.json").unlink()
+    write(a, "locks/jobs.lever.co-2222222222222222.json", lock("jobs.lever.co-2222222222222222", "laptop"))
+    a.commit_all("release x, lock y")
+    a.push()
+    # B: recovers X as stale (rewrites it with its own device) before seeing A's push
+    write(b, "locks/jobs.lever.co-1111111111111111.json", lock("jobs.lever.co-1111111111111111", "desktop"))
+    b.commit_all("stale lock x recovered")
+    b.fetch()
+    conflicts = b.merge_remote()
+    y = b.path / "locks/jobs.lever.co-2222222222222222.json"
+    if not conflicts:
+        assert '"device": "laptop"' in y.read_text(encoding="utf-8")
+    # Y must be A's lock exactly; the only conflict allowed is on X (modify/delete)
+    assert conflicts in ([], ["locks/jobs.lever.co-1111111111111111.json"]), conflicts
+    assert '"job_key": "jobs.lever.co-2222222222222222"' in y.read_text(encoding="utf-8")
+    assert '"device": "laptop"' in y.read_text(encoding="utf-8")

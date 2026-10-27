@@ -49,30 +49,37 @@ fn get_api_token() -> Result<String, String> {
     Err(format!("Token file not found after 30s: {}", token_path.display()))
 }
 
+/// Documents the UI may hand to the OS (tailored resumes and their text exports).
+const OPENABLE_EXTENSIONS: &[&str] = &["pdf", "docx", "doc", "txt", "md", "rtf", "odt"];
+
+/// Only an existing, absolute document file may be opened: never a URL, a directory or a
+/// program, whatever string the webview sends.
+fn checked_open_path(path: &str) -> Result<std::path::PathBuf, String> {
+    let p = std::path::PathBuf::from(path.trim());
+    if !p.is_absolute() {
+        return Err(format!("Refusing to open a relative path: {path}"));
+    }
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    if !OPENABLE_EXTENSIONS.contains(&ext.as_str()) {
+        return Err(format!("Refusing to open this kind of file: {path}"));
+    }
+    if !p.is_file() {
+        return Err(format!("File not found: {path}"));
+    }
+    Ok(p)
+}
+
 #[tauri::command]
 fn open_file(path: String) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(&path)
-            .spawn()
-            .map_err(|e| format!("Failed to open file: {}", e))?;
-    }
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", &path])
-            .spawn()
-            .map_err(|e| format!("Failed to open file: {}", e))?;
-    }
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&path)
-            .spawn()
-            .map_err(|e| format!("Failed to open file: {}", e))?;
-    }
-    Ok(())
+    let p = checked_open_path(&path)?;
+    // The path goes to the OS as one argument (ShellExecuteW on Windows, `open` on macOS,
+    // xdg-open/gio on Linux). The old Windows `cmd /C start "" <path>` let cmd re-parse the
+    // path, so a name containing `&` or `^` was split into a second command.
+    open::that_detached(&p).map_err(|e| format!("Failed to open file: {e}"))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -106,4 +113,43 @@ pub fn run() {
             // We don't kill the sidecar here because Tauri may fire Exit
             // before the sidecar finishes starting (observed on macOS M1)
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::checked_open_path;
+
+    fn tmp_file(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("aq-open-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join(name);
+        std::fs::write(&p, b"%PDF-1.4").unwrap();
+        p
+    }
+
+    #[test]
+    fn accepts_an_existing_pdf_with_shell_metacharacters_in_its_name() {
+        let p = tmp_file("Alex Example & Co ^ 100% resume.pdf");
+        assert_eq!(checked_open_path(p.to_str().unwrap()).unwrap(), p);
+    }
+
+    #[test]
+    fn extension_check_is_case_insensitive() {
+        let p = tmp_file("Alex_Example.PDF");
+        assert!(checked_open_path(p.to_str().unwrap()).is_ok());
+    }
+
+    #[test]
+    fn refuses_relative_paths_urls_programs_dirs_and_missing_files() {
+        assert!(checked_open_path("resume.pdf").is_err());
+        assert!(checked_open_path("https://example.com/a.pdf").is_err());
+        let exe = tmp_file("not-a-resume.exe");
+        assert!(checked_open_path(exe.to_str().unwrap()).is_err());
+        let sh = tmp_file("run.sh");
+        assert!(checked_open_path(sh.to_str().unwrap()).is_err());
+        let dir = std::env::temp_dir();
+        assert!(checked_open_path(dir.to_str().unwrap()).is_err());
+        let missing = std::env::temp_dir().join("aq-missing-Alex-Example.pdf");
+        assert!(checked_open_path(missing.to_str().unwrap()).is_err());
+    }
 }

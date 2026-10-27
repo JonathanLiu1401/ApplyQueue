@@ -99,7 +99,7 @@ async def lifespan(app: FastAPI):
     time.sleep(2)
     _kill_browser_processes()
 
-app = FastAPI(title="ApplyQueue Backend", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="ApplyQueue Backend", version="0.1.0", lifespan=lifespan)
 
 # ── Auth token (generated per-session, written to data dir for frontend) ──
 import secrets as _secrets
@@ -591,7 +591,7 @@ async def health():
     all_ok = db_ok and chromium_ok and llm_configured
     return {
         "status": "ok" if all_ok else "degraded",
-        "version": "1.0.0",
+        "version": "0.1.0",
         "app": "applyqueue",
         "pid": os.getpid(),
         "orphaned": _orphaned(),

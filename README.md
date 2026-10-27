@@ -23,6 +23,42 @@
 OpenRouter, OpenAI-compatible) · **local models with no subscription** (Ollama, LM Studio,
 llama.cpp, Hugging Face).
 
+## Download
+
+Get the installer for your computer from the
+[Releases page](https://github.com/JonathanLiu1401/ApplyQueue/releases/latest). Pick **one** file:
+
+| Your computer | Download this file |
+|---|---|
+| **Mac with Apple silicon** (M1, M2, M3, M4 or newer) | `ApplyQueue_<version>_aarch64.dmg` |
+| **Mac with an Intel chip** | `ApplyQueue_<version>_x64.dmg` |
+| **Windows 10 or 11** | `ApplyQueue_<version>_x64-setup.exe` (or the `.msi` if your workplace prefers MSI) |
+| **Linux, any distro** | `ApplyQueue_<version>_amd64.AppImage` |
+| **Ubuntu, Debian, Mint, Pop!_OS** | `ApplyQueue_<version>_amd64.deb` |
+| **Fedora, RHEL, openSUSE** | `ApplyQueue-<version>-1.x86_64.rpm` |
+
+Not sure which Mac you have? Click the Apple menu, then **About This Mac**. If it says **Chip:
+Apple M…**, take the Apple silicon file. If it says **Processor: Intel**, take the Intel file.
+
+### Opening the app the first time
+
+The installers are **not code-signed yet** (signing certificates cost money and this is a free
+project). Your computer will warn you the first time. This is expected, and you only do it once.
+To check that your download was not changed, compare it with `SHA256SUMS.txt` on the release page.
+
+- **macOS:** open the `.dmg` and drag **ApplyQueue** into **Applications**. In Applications,
+  **right-click** (or Control-click) ApplyQueue and choose **Open**, then click **Open** again.
+  If macOS only offers "Move to Trash" or "Done", click **Done**, open **System Settings >
+  Privacy & Security**, scroll down to the message about ApplyQueue, click **Open Anyway**, and
+  confirm.
+- **Windows:** run the `-setup.exe`. If a blue **"Windows protected your PC"** (SmartScreen) box
+  appears, click **More info**, then **Run anyway**.
+- **Linux AppImage:** make it executable, then run it:
+  `chmod +x ApplyQueue_*.AppImage && ./ApplyQueue_*.AppImage`
+  (or right-click the file > Properties > Permissions > "Allow executing file as program").
+  If it complains about FUSE, install `libfuse2` (Ubuntu 22.04: `sudo apt install libfuse2`).
+- **Linux .deb / .rpm:** `sudo apt install ./ApplyQueue_*.deb` or `sudo dnf install ./ApplyQueue-*.rpm`.
+
 ## Run 100% locally, no subscription
 
 Pick **"Run 100% locally"** in the setup wizard. ApplyQueue finds Ollama, LM Studio, llama.cpp,

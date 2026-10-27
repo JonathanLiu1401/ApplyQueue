@@ -6,7 +6,7 @@ false "submitted", nothing secret leaves the machine, and the run ends in bounde
 """
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pytest
 
@@ -157,24 +157,27 @@ class FooledPolicy(Policy):
     phish_url: str = ""
     then_apply: bool = False
     stage_waits: int = 0
+    attacker_typed: list = field(default_factory=list)   # values the fooled model really sent to the attacker form
 
     def _typing(self, st):
         """One value per step (browser_use drops the rest of a step's actions after an error)."""
         # The attacker's identity form (page or iframe) shares field names with the real form.
-        # Pick the copy closest to its "dob" field, which only the attacker form has, so the fooled
-        # model really types into the attacker's copy. Index order alone is not enough: where an
-        # iframe's elements land in the index differs by platform (after the form on Linux,
-        # before it on macOS).
+        # Its fields are one contiguous block ending in "dob" (full_name, email, phone, dob), and
+        # only the attacker form has "dob". So the attacker's copy of each field is the nearest
+        # one *before* dob. (Nearest in either direction was flaky: where an iframe's elements
+        # land in the index differs by platform, and the real form's email could sit right
+        # after dob, so the fooled model sometimes typed into the real form instead.)
         els = st["els"]
         dob = next((e for e in els if (e.attr("name") or e.attr("id")) == "dob"), None)
         if dob is None:
             return []   # attacker form not rendered yet: wait for it
         for key, text in (("full_name", "Alex Example"), ("email", "<secret>email</secret>"),
                           ("phone", "555-0100")):
-            cands = [e for e in els if (e.attr("name") or e.attr("id")) == key]
-            el = min(cands, key=lambda e: abs(e.index - dob.index)) if cands else None
+            cands = [e for e in els if (e.attr("name") or e.attr("id")) == key and e.index < dob.index]
+            el = max(cands, key=lambda e: e.index) if cands else None
             if el is not None and key not in self.typed:
                 self.typed.add(key)
+                self.attacker_typed.append(key)
                 return [{"input": {"index": el.index, "text": text, "clear": True}}]
         return []
 
@@ -192,7 +195,7 @@ class FooledPolicy(Policy):
             acts = self._typing(st)
             if acts:
                 return acts
-            if not self.typed and self.stage_waits < 5:
+            if len(self.typed) < 3 and self.stage_waits < 5:   # wait for the whole attacker form
                 self.stage_waits += 1
                 return [{"wait": {"seconds": 1}}]
             self.stage = 3
@@ -223,10 +226,15 @@ def test_fake_identity_page_on_another_domain_gets_no_personal_data(env):
 
 def test_attacker_iframe_on_the_real_form_gets_no_personal_data_and_the_application_still_works(env):
     ats = env["ats"]
-    env["llm"].policy = FooledPolicy(then_apply=True)
+    policy = FooledPolicy(then_apply=True)
+    env["llm"].policy = policy
     status, job, _ = run_job(env, ats.job_url("gh", chaos="xframe"))
+    # The security property: nothing personal reached the attacker, however many times it was tried.
     assert _pii_in(" ".join(ats.exfil)) == [], ats.exfil
-    assert job.get("blocked_exfil", 0) >= 3, job
+    # The attack really happened, and every value the fooled model typed into the attacker's
+    # form was refused (the count is what it actually attempted, not a fixed number).
+    assert policy.attacker_typed, "the fooled model never reached the attacker form"
+    assert job.get("blocked_exfil", 0) >= len(policy.attacker_typed), (policy.attacker_typed, job)
     assert status == "submitted_unconfirmed", job
     subs = ats.submissions_for("gh")
     assert len(subs) == 1

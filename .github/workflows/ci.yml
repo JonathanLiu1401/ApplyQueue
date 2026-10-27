@@ -235,7 +235,12 @@ jobs:
           export APPLYQUEUE_NATIVE_DRIVER="$(cygpath -m "$RUNNER_TEMP")/msedgedriver.exe"
           export APPLYQUEUE_TAURI_APP="$(cygpath -m "$PWD")/src-tauri/target/x86_64-pc-windows-msvc/release/app.exe"
           test -f "$APPLYQUEUE_TAURI_APP" && test -f "$APPLYQUEUE_NATIVE_DRIVER"
-          uv run pytest tests/webdriver -x -rs -p no:cacheprovider | tee "$RUNNER_TEMP/wd.log"
+          # Edge/WebView2 refuse --remote-debugging-port when this policy is off (DevToolsActivePort error).
+          reg add 'HKLM\SOFTWARE\Policies\Microsoft\Edge' //v RemoteDebuggingAllowed //t REG_DWORD //d 1 //f || true
+          "$APPLYQUEUE_NATIVE_DRIVER" --version || true
+          reg query 'HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' //v pv || true
+          uv run pytest tests/webdriver -x -rs -p no:cacheprovider | tee "$RUNNER_TEMP/wd.log" || {
+            find "$LOCALAPPDATA" "$TEMP" -name DevToolsActivePort 2>/dev/null | head; exit 1; }
           if grep -q SKIPPED "$RUNNER_TEMP/wd.log"; then echo "::error::WebDriver tests were skipped"; exit 1; fi
 
   intel-mac:

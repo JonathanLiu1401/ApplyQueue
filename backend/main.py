@@ -244,6 +244,18 @@ app.add_middleware(
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
+def _shutdown_orphan(grace: float = 15.0, kill=None, exit_=None, sleep=None):
+    """Ask uvicorn to stop, then make sure we really go: a graceful shutdown can stall on an open
+    connection or a background download (first launch installs Chromium) and an orphan that keeps
+    the port blocks the next app start. Seen on a slow Intel Mac runner."""
+    import time as _time
+    kill, exit_, sleep = kill or os.kill, exit_ or os._exit, sleep or _time.sleep
+    kill(os.getpid(), signal.SIGTERM)
+    sleep(grace)
+    _log.warning("Graceful shutdown did not finish — exiting hard")
+    exit_(0)
+
+
 def _start_parent_watchdog():
     """Exit if the parent process (Tauri app) dies — prevents orphaned sidecar.
 
@@ -285,7 +297,7 @@ def _start_parent_watchdog():
             _time.sleep(5)
 
         _log.info("Parent process died — shutting down backend")
-        os.kill(os.getpid(), signal.SIGTERM)
+        _shutdown_orphan()
 
     t = threading.Thread(target=_watch, daemon=True, name="parent-watchdog")
     t.start()

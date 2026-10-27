@@ -252,6 +252,13 @@ class SyncEngine:
                 keep = theirs
                 if theirs is None or self._lock_expired(theirs):
                     keep = ours
+                # One side deleted the lock (modify/delete; criss-cross merges produce these even
+                # when nobody edited it). The owner's side decides: a device's release of its own
+                # lock wins, and another device's lock is never resurrected or kept alive by us.
+                if theirs is None and ours is not None and self._lock_owner(ours) != self.device:
+                    keep = None
+                elif ours is None and theirs is not None and self._lock_owner(theirs) == self.device:
+                    keep = None
                 if ours and keep is theirs:
                     lost_locks.append(Path(path).stem)
                 repo.resolve(path, keep)
@@ -347,6 +354,13 @@ class SyncEngine:
     # ── locks ──
     def _lock_path(self, key: str) -> str:
         return f"locks/{key}.json"
+
+    @staticmethod
+    def _lock_owner(blob: str) -> str | None:
+        try:
+            return json.loads(blob).get("device")
+        except (ValueError, AttributeError):
+            return None
 
     def _lock_expired(self, blob: str) -> bool:
         try:

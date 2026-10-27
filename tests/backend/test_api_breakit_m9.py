@@ -129,3 +129,15 @@ def test_wrong_typed_bodies_never_500_or_poison_reads(client, monkeypatch):
             if code >= 500:
                 bad.append(("GET", r.path, "after fuzz", code))
     assert not bad, bad
+
+
+def test_orphan_shutdown_exits_hard_when_graceful_stop_stalls():
+    """The watchdog's SIGTERM is only a request; if uvicorn's graceful stop hangs the orphan must
+    still release the port (an Intel Mac runner kept it for 90 s)."""
+    import signal as _signal
+    calls = []
+    main._shutdown_orphan(grace=7, kill=lambda pid, sig: calls.append(("kill", pid, sig)),
+                          exit_=lambda code: calls.append(("exit", code)),
+                          sleep=lambda s: calls.append(("sleep", s)))
+    import os as _os
+    assert calls == [("kill", _os.getpid(), _signal.SIGTERM), ("sleep", 7), ("exit", 0)]

@@ -307,3 +307,44 @@ def test_merge_does_not_pair_a_released_lock_with_a_new_one_as_a_rename(tmp_path
     assert conflicts in ([], ["locks/jobs.lever.co-1111111111111111.json"]), conflicts
     assert '"job_key": "jobs.lever.co-2222222222222222"' in y.read_text(encoding="utf-8")
     assert '"device": "laptop"' in y.read_text(encoding="utf-8")
+
+
+# ── modify/delete on a lock: the owner's side decides ──
+@pytest.mark.parametrize("ours_dev, theirs_dev, expect", [
+    ("desktop", None, None),        # remote released desktop's lock; we must not resurrect it
+    ("laptop", None, "laptop"),     # our own live claim vs a remote delete: keep our claim
+    (None, "laptop", None),         # we released our own lock; a stale remote copy must not revive it
+    (None, "desktop", "desktop"),   # another device's live lock that we never had: keep it
+])
+def test_lock_modify_delete_conflicts_follow_the_owner(world, ours_dev, theirs_dev, expect):
+    """Criss-cross merges (two devices merging each other at once) turn a plain release into a
+    modify/delete conflict. Keeping "whichever side still has it" left released locks on the
+    remote forever (seen on Windows, where git is slower and the race window wider)."""
+    eng = world.use("laptop", kind="git")
+    me = eng.device
+
+    def blob(dev):
+        if dev is None:
+            return None
+        return json.dumps({"job_key": "k", "worker": f"{dev}-w", "device": me if dev == "laptop" else dev,
+                           "claimed_at": time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime()),
+                           "ttl_sec": 7200}) + "\n"
+
+    resolved = {}
+
+    class FakeRepo:
+        def stage_version(self, path, stage):
+            return blob(ours_dev) if stage == 2 else blob(theirs_dev)
+
+        def resolve(self, path, content):
+            resolved[path] = content
+
+        def finish_merge(self):
+            pass
+
+    eng._resolve_conflicts(FakeRepo(), ["locks/jobs.lever.co-0123456789abcdef.json"])
+    got = resolved["locks/jobs.lever.co-0123456789abcdef.json"]
+    if expect is None:
+        assert got is None
+    else:
+        assert got is not None and json.loads(got)["device"] == (me if expect == "laptop" else expect)

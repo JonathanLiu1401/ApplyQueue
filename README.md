@@ -9,13 +9,13 @@
 > Playwright. Thank you to the LangHire authors; see [LICENSE](LICENSE) and the upstream
 > README kept at [docs/LANGHIRE_README.md](docs/LANGHIRE_README.md).
 
-> **Status: pre-alpha, private.** This repository stays private until the full end-to-end and
-> break-it test suite passes on macOS, Windows, and Linux and the maintainer approves the test
-> report. See [docs/PLAN.md](docs/PLAN.md).
+> **Status: alpha (v0.1.0 draft).** The source is public; installers are built by GitHub Actions
+> and are **unsigned** (macOS Gatekeeper and Windows SmartScreen will warn; see Download below).
 >
-> **Tested platforms today:** Linux x86_64 (full suite on every push). **Windows is untested**:
-> no real Windows hardware is available, so nothing since the last GitHub-hosted run (dd77c14) has
-> run on Windows. Intel Mac waits for its CI runner; Apple silicon is untested (no machine). See
+> **Tested platforms:** Linux x86_64 (self-hosted CI on every push), plus **GitHub-hosted VMs**
+> (not physical hardware) for Windows x64, Intel Mac (macos-15-intel) and Apple silicon
+> (macos-14): vitest, the full pytest suite and UI e2e against the packaged sidecar, and an
+> install + launch + `/health` smoke of the built installers. Details and run links:
 > [docs/applyqueue/TEST_REPORT.md](docs/applyqueue/TEST_REPORT.md).
 
 **Works with:** Grok Bot (recommended) · Claude Code · Grok Build · Cursor CLI · ChatGPT / Codex

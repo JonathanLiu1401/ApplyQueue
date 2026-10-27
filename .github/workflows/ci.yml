@@ -66,6 +66,12 @@ env:
   UV_PYTHON_PREFERENCE: only-managed
   CI: 'true'
 
+# Explicit bash means "bash -eo pipefail": without it macOS/Linux steps run "bash -e" and a failing
+# "pytest ... | tee" step passed (Intel Mac UI e2e had 1 failure in a green run, 2026-10-26).
+defaults:
+  run:
+    shell: bash
+
 jobs:
   linux:
     name: Linux checks (privacy, licenses, unit, e2e, break-it)

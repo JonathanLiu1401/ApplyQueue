@@ -93,7 +93,11 @@ pub fn run() {
         .setup(|app| {
             let shell = app.shell();
             match shell.sidecar("applyqueue-backend") {
-                Ok(sidecar) => match sidecar.args(["8743"]).spawn() {
+                Ok(sidecar) => match sidecar
+                    .args(["8743"])
+                    // The backend watches this pid and exits if the window dies (see _launcher_pid).
+                    .env("APPLYQUEUE_WINDOW_PID", std::process::id().to_string())
+                    .spawn() {
                     Ok((_rx, child)) => {
                         log::info!("Backend sidecar started on port 8743");
                         *app.state::<Backend>().0.lock().unwrap() = Some(child);

@@ -136,18 +136,29 @@ import stat as _stat
 _token_path = get_data_dir() / ".api_token"
 
 
-def _launcher_pid() -> int:
+def _launcher_pid(environ=None, launch_ppid=None, proc=None) -> int:
     """The app window's pid. Some launchers sit between the window and us and outlive the
     window: a PyInstaller onefile bootloader (same executable as ours) and the Windows venv
     ``python.exe`` redirector (same arguments as ours). When our parent is one of those, the
     window is its parent."""
-    pid = _LAUNCH_PPID
-    if getattr(sys, "frozen", False) or os.name == "nt":
+    # The app window passes its own pid (Tauri sets APPLYQUEUE_WINDOW_PID): exact, and immune to the
+    # window dying before we get here (a slow onefile unpack on an Intel Mac took longer than that).
+    env_pid = (environ if environ is not None else os.environ).get("APPLYQUEUE_WINDOW_PID", "").strip()
+    if env_pid.isdigit() and int(env_pid) > 1:
+        return int(env_pid)
+    pid = _LAUNCH_PPID if launch_ppid is None else launch_ppid
+    if getattr(sys, "frozen", False) or os.name == "nt" or proc is not None:
         try:
-            import psutil
-            me, parent = psutil.Process(), psutil.Process(pid)
+            if proc is None:
+                import psutil
+                me, parent = psutil.Process(), psutil.Process(pid)
+            else:
+                me, parent = proc(None), proc(pid)
             if parent.exe() == me.exe() or (len(me.cmdline()) > 1 and parent.cmdline()[1:] == me.cmdline()[1:]):
-                return parent.ppid()
+                # ppid <= 1: the launcher was already re-parented to init/launchd, so the window is
+                # gone. Return 1 ("orphaned") instead of letting the watchdog watch only the launcher,
+                # which lives as long as we do.
+                return max(parent.ppid(), 1)
         except Exception:
             pass
     return pid
@@ -264,6 +275,17 @@ def _start_parent_watchdog():
     watched, M8), and on Windows stopping the bootloader does not stop us (so it must be watched
     too, otherwise a sidecar restart leaves us holding the port)."""
     watched = sorted({p for p in (_PARENT_PID, _LAUNCH_PPID) if p > 1})
+    if _PARENT_PID <= 1 < _LAUNCH_PPID:
+        # A launcher sits between us and the window and the window is already gone (see
+        # _launcher_pid): watching only the launcher would keep an orphan holding the port.
+        def _gone():
+            import time as _time
+            _time.sleep(10)
+            _log.info("App window was gone before the backend started — shutting down backend")
+            _shutdown_orphan()
+        threading.Thread(target=_gone, daemon=True, name="parent-watchdog").start()
+        _log.info("Parent watchdog: window already gone at start")
+        return
     if not watched:
         _log.info(f"Parent watchdog skipped (ppid={_PARENT_PID}, already orphaned or init)")
         return

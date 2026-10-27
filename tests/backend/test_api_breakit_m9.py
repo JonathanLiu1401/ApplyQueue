@@ -141,3 +141,44 @@ def test_orphan_shutdown_exits_hard_when_graceful_stop_stalls():
                           sleep=lambda s: calls.append(("sleep", s)))
     import os as _os
     assert calls == [("kill", _os.getpid(), _signal.SIGTERM), ("sleep", 7), ("exit", 0)]
+
+
+class _FakeProc:
+    def __init__(self, exe, cmdline, ppid):
+        self._exe, self._cmdline, self._ppid = exe, cmdline, ppid
+
+    def exe(self):
+        return self._exe
+
+    def cmdline(self):
+        return self._cmdline
+
+    def ppid(self):
+        return self._ppid
+
+
+def _procs(table):
+    return lambda pid: table[pid]
+
+
+def test_launcher_pid_prefers_window_pid_from_env():
+    """The window passes its pid: used as is, even if the launcher chain says otherwise."""
+    assert main._launcher_pid(environ={"APPLYQUEUE_WINDOW_PID": "4242"}, launch_ppid=77,
+                              proc=_procs({None: _FakeProc("/a", ["/a", "8743"], 77),
+                                           77: _FakeProc("/a", ["/a", "8743"], 1)})) == 4242
+    # junk / init pids in the env are ignored
+    for junk in ("", "abc", "1", "0", "-5"):
+        assert main._launcher_pid(environ={"APPLYQUEUE_WINDOW_PID": junk}, launch_ppid=77,
+                                  proc=_procs({None: _FakeProc("/me", ["/me"], 77),
+                                               77: _FakeProc("/other", ["/other"], 5)})) == 77
+
+
+def test_launcher_pid_window_already_gone_reports_orphaned():
+    """Onefile bootloader between us and the window, and the window died before we started (slow
+    unpack on an Intel Mac): the bootloader was re-parented to launchd/init, so report 1, not a pid
+    the watchdog would wait on forever."""
+    table = {None: _FakeProc("/app/backend", ["/app/backend", "8743"], 50),
+             50: _FakeProc("/app/backend", ["/app/backend", "8743"], 1)}
+    assert main._launcher_pid(environ={}, launch_ppid=50, proc=_procs(table)) == 1
+    table[50] = _FakeProc("/app/backend", ["/app/backend", "8743"], 900)
+    assert main._launcher_pid(environ={}, launch_ppid=50, proc=_procs(table)) == 900

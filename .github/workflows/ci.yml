@@ -128,9 +128,20 @@ jobs:
           src-tauri/binaries/applyqueue-backend-x86_64-unknown-linux-gnu --self-test | tee "$RUNNER_TEMP/st.json"
           grep -q '"tzdb": true' "$RUNNER_TEMP/st.json"
       - name: UI e2e + adversarial (production frontend + packaged sidecar)
+        id: ui_e2e
+        env:
+          APPLYQUEUE_E2E_ARTIFACTS: ${{ runner.temp }}/ui-e2e-artifacts
         run: |
           APPLYQUEUE_SIDECAR="$PWD/src-tauri/binaries/applyqueue-backend-x86_64-unknown-linux-gnu" \
             uv run pytest tests/ui_e2e -q -rs -p no:cacheprovider
+      - name: Upload UI e2e trace + sidecar log (on failure)
+        if: failure() || steps.ui_e2e.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-e2e-failure-linux
+          path: ${{ runner.temp }}/ui-e2e-artifacts/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Disk hygiene (build output, deps, caches)
         if: always()
         run: |
@@ -222,11 +233,22 @@ jobs:
           src-tauri/binaries/applyqueue-backend-x86_64-pc-windows-msvc.exe --self-test | tee "$RUNNER_TEMP/st.json"
           grep -q '"tzdb": true' "$RUNNER_TEMP/st.json"
       - name: UI e2e + adversarial (production frontend + packaged sidecar)
+        id: ui_e2e
         continue-on-error: ${{ inputs.probe == true }}
+        env:
+          APPLYQUEUE_E2E_ARTIFACTS: ${{ runner.temp }}/ui-e2e-artifacts
         run: |
           APPLYQUEUE_SIDECAR="$(cygpath -m "$PWD")/src-tauri/binaries/applyqueue-backend-x86_64-pc-windows-msvc.exe" \
             uv run pytest tests/ui_e2e -rs -p no:cacheprovider | tee "$RUNNER_TEMP/ui.log"
           if grep -E "SKIPPED.*test_ui_flows" "$RUNNER_TEMP/ui.log"; then echo "::error::UI flow tests were skipped (no built dist?)"; exit 1; fi
+      - name: Upload UI e2e trace + sidecar log (on failure)
+        if: failure() || steps.ui_e2e.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-e2e-failure-windows
+          path: ${{ runner.temp }}/ui-e2e-artifacts/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Rust unit tests (open_file path checks)
         continue-on-error: ${{ inputs.probe == true }}
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib --target x86_64-pc-windows-msvc
@@ -300,11 +322,22 @@ jobs:
           grep -q '"machine": "x86_64"' "$RUNNER_TEMP/st.json"
           grep -q '"tzdb": true' "$RUNNER_TEMP/st.json"
       - name: UI e2e + adversarial (production frontend + packaged sidecar)
+        id: ui_e2e
         continue-on-error: ${{ inputs.probe == true }}
+        env:
+          APPLYQUEUE_E2E_ARTIFACTS: ${{ runner.temp }}/ui-e2e-artifacts
         run: |
           APPLYQUEUE_SIDECAR="$PWD/src-tauri/binaries/applyqueue-backend-x86_64-apple-darwin" \
             uv run pytest tests/ui_e2e -rs -p no:cacheprovider | tee "$RUNNER_TEMP/ui.log"
           if grep -E "SKIPPED.*test_ui_flows" "$RUNNER_TEMP/ui.log"; then echo "::error::UI flow tests were skipped (no built dist?)"; exit 1; fi
+      - name: Upload UI e2e trace + sidecar log (on failure)
+        if: failure() || steps.ui_e2e.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-e2e-failure-intel-mac
+          path: ${{ runner.temp }}/ui-e2e-artifacts/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Rust unit tests (open_file path checks)
         continue-on-error: ${{ inputs.probe == true }}
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib --target x86_64-apple-darwin
@@ -356,11 +389,22 @@ jobs:
           grep -q '"machine": "arm64"' "$RUNNER_TEMP/st.json"
           grep -q '"tzdb": true' "$RUNNER_TEMP/st.json"
       - name: UI e2e + adversarial (production frontend + packaged sidecar)
+        id: ui_e2e
         continue-on-error: ${{ inputs.probe == true }}
+        env:
+          APPLYQUEUE_E2E_ARTIFACTS: ${{ runner.temp }}/ui-e2e-artifacts
         run: |
           APPLYQUEUE_SIDECAR="$PWD/src-tauri/binaries/applyqueue-backend-aarch64-apple-darwin" \
             uv run pytest tests/ui_e2e -rs -p no:cacheprovider | tee "$RUNNER_TEMP/ui.log"
           if grep -E "SKIPPED.*test_ui_flows" "$RUNNER_TEMP/ui.log"; then echo "::error::UI flow tests were skipped (no built dist?)"; exit 1; fi
+      - name: Upload UI e2e trace + sidecar log (on failure)
+        if: failure() || steps.ui_e2e.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-e2e-failure-apple-silicon
+          path: ${{ runner.temp }}/ui-e2e-artifacts/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Rust unit tests (open_file path checks)
         continue-on-error: ${{ inputs.probe == true }}
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib --target aarch64-apple-darwin

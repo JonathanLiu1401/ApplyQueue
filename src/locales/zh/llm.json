@@ -4,8 +4,12 @@
   "selectProvider": "选择提供商",
   "configuration": "{{provider}} 配置",
   "providers": {
+    "xai": {
+      "name": "xAI Grok（推荐）",
+      "description": "通过 xAI API 密钥使用支持视觉和工具调用的 Grok 4.x 模型"
+    },
     "openrouter": {
-      "name": "OpenRouter（推荐）",
+      "name": "OpenRouter",
       "description": "通过单个 API 密钥使用 100 多个视觉模型（GPT、Claude、Gemini、Qwen、Llama）"
     },
     "openai": {
@@ -81,7 +85,15 @@
       "step4": "复制密钥并粘贴到下方。它以 sk-or-v1- 开头。",
       "note": "OpenRouter 让你用单个密钥访问 100 多个模型。在 openrouter.ai/credits 添加额度。价格因模型而异。"
     },
-    "note": "注意："
+    "note": "注意：",
+    "xai": {
+      "step1": "前往 xAI 控制台，使用 X 或 xAI 账号登录。",
+      "step1Link": "console.x.ai",
+      "step2": "打开 API Keys，点击“Create API key”。",
+      "step3": "如果团队还没有付款方式，请在 Billing 中添加额度或付款方式。",
+      "step4": "复制密钥并粘贴到下方。密钥以 xai- 开头。",
+      "note": "xAI API 与 SuperGrok 或 X Premium 分开计费。如需改用 Grok 订阅，请参阅下方的“Use your AI subscription”。"
+    }
   },
   "ollama": {
     "serverUrlHint": "你的 Ollama 服务器运行所在的 URL。",
@@ -110,5 +122,13 @@
     "testConnection": "测试连接",
     "connectionSuccessful": "连接成功！",
     "connectionFailed": "连接失败。"
+  },
+  "xai": {
+    "keyLabel": "xAI API 密钥",
+    "keyHint": "密钥仅保存在这台电脑上。获取地址：",
+    "modelLabel": "Grok 模型",
+    "refreshModels": "刷新 Grok 模型",
+    "modelsFromApi": "此密钥可用 {{count}} 个 Grok 模型。",
+    "modelsFallback": "默认 Grok 模型。"
   }
 }

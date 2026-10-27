@@ -146,6 +146,8 @@ export default function SettingsPage() {
         </div>
       )}
 
+      <AgentBackendsSection />
+
       {/* Language */}
       <Section title={t("language.title")}>
         <div>
@@ -242,8 +244,6 @@ export default function SettingsPage() {
           </p>
         </div>
       </Section>
-
-      <AgentBackendsSection />
 
       <EmailAccountsSection />
       <SyncSection />

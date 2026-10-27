@@ -130,6 +130,13 @@ export async function fetchOllamaModels(baseUrl: string) {
   });
 }
 
+export async function fetchXaiModels(apiKey: string) {
+  return request<{ success: boolean; source: "api" | "fallback"; models: string[]; message?: string }>(
+    "/llm/xai-models",
+    { method: "POST", body: JSON.stringify({ api_key: apiKey }) },
+  );
+}
+
 // ── App Settings ──────────────────────────────────────────────────────────
 export async function getSettings() {
   return request<AppSettings>("/settings");
@@ -469,6 +476,8 @@ export interface AgentBackend {
   docs_url: string;
   login_methods: string[];
   notes: string;
+  install_steps?: { label: string; command: string }[];
+  login_steps?: { label: string; command: string }[];
 }
 
 export async function getAgentBackends() {

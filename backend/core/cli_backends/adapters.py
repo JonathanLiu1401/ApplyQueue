@@ -23,19 +23,28 @@ GROK = CliSpec(
     docs_url="https://docs.x.ai/", transport="acp", api_key_env=("XAI_API_KEY",),
     auth_args=("models",),
     login_methods=("SuperGrok / X Premium login", "XAI_API_KEY"),
+    install_steps=(("macOS / Linux", "curl -fsSL https://x.ai/cli/install.sh | bash"),
+                   ("Windows (PowerShell)", "irm https://x.ai/cli/install.ps1 | iex")),
+    login_steps=(("Sign in", "grok login"), ("Remote or headless machine", "grok login --device-auth")),
 )
 CURSOR = CliSpec(
     id="cursor", name="Cursor CLI", vendor="Cursor", binaries=("agent", "cursor-agent"),
     login_command="agent login", install_hint="curl https://cursor.com/install -fsS | bash, then `agent login`.",
     docs_url="https://cursor.com/docs/cli/overview", transport="stream-json", auth_args=("status",),
     api_key_env=("CURSOR_API_KEY",), login_methods=("Cursor account", "CURSOR_API_KEY"),
+    install_steps=(("macOS / Linux", "curl https://cursor.com/install -fsS | bash"),
+                   ("Windows (PowerShell)", "irm 'https://cursor.com/install?win32=true' | iex")),
+    login_steps=(("Sign in", "agent login"), ("Check", "agent status")),
 )
 CODEX = CliSpec(
     id="codex", name="Codex CLI", vendor="OpenAI", binaries=("codex",), login_command="codex login",
     install_hint="npm install -g @openai/codex, then `codex login` (Sign in with ChatGPT or an API key).",
     docs_url="https://developers.openai.com/codex/cli", transport="codex-json", auth_args=("login", "status"),
     api_key_env=("OPENAI_API_KEY",), login_methods=("Sign in with ChatGPT", "OpenAI API key"),
-    notes="Sign in with ChatGPT tokens stay on this device; ApplyQueue never reads or syncs them.",
+    notes="Uses \"Sign in with ChatGPT\": the token stays on this device and ApplyQueue never reads or syncs it.",
+    install_steps=(("npm (macOS / Linux / Windows)", "npm install -g @openai/codex"),),
+    login_steps=(("Sign in with ChatGPT", "codex login"), ("Remote or headless machine", "codex login --device-auth"),
+                 ("Check", "codex login status")),
 )
 CLAUDE = CliSpec(
     id="claude", name="Claude Code", vendor="Anthropic", binaries=("claude",), login_command="claude auth login",
@@ -45,6 +54,8 @@ CLAUDE = CliSpec(
     login_methods=("Claude subscription login", "ANTHROPIC_API_KEY"),
     notes="Opt-in. Runs the unmodified Claude Code CLI under your own login; an Anthropic API key "
           "(Settings → AI model) stays the default way to use Claude.",
+    install_steps=(("npm (macOS / Linux / Windows)", "npm install -g @anthropic-ai/claude-code"),),
+    login_steps=(("Sign in", "claude auth login"), ("Check", "claude auth status")),
 )
 GEMINI = CliSpec(
     id="gemini", name="Gemini", vendor="Google", binaries=(), login_command="",
@@ -107,6 +118,8 @@ def detect(spec: CliSpec, cfg: dict | None, check_auth: bool = True) -> dict:
         "terms_accepted": bool(cfg.get("terms_accepted_at")), "enabled": bool(cfg.get("enabled")),
         "login_command": spec.login_command, "install_hint": spec.install_hint, "docs_url": spec.docs_url,
         "login_methods": list(spec.login_methods), "notes": spec.notes, "custom_path": cfg.get("path") or "",
+        "install_steps": [{"label": a, "command": b} for a, b in spec.install_steps],
+        "login_steps": [{"label": a, "command": b} for a, b in spec.login_steps],
         "installed": False, "path": None, "version": None, "auth": {"state": "unknown", "method": None},
     }
     if not spec.runnable:

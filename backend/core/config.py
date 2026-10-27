@@ -297,7 +297,8 @@ def save_profile(profile: dict):
 
 def load_llm_settings() -> dict:
     return _load_json(get_data_dir() / "llm_settings.json", {
-        "provider": "openrouter",
+        "provider": "xai",
+        "xai": {"api_key": "", "model": "grok-4.7"},
         "openai": {"api_key": "", "model": "gpt-4o"},
         "anthropic": {"api_key": "", "model": "claude-sonnet-4-5"},
         "bedrock": {"access_key": "", "secret_key": "", "region": "us-west-2", "model": "us.anthropic.claude-sonnet-4-6"},

@@ -130,8 +130,9 @@ def test_save_and_load_profile_roundtrip(data_dir):
 def test_load_llm_settings_defaults(data_dir):
     """Default LLM settings expose every provider sub-config."""
     s = config.load_llm_settings()
-    assert s["provider"] == "openrouter"
-    for key in ("openai", "anthropic", "bedrock", "ollama", "openrouter"):
+    assert s["provider"] == "xai"  # xAI Grok is the recommended default
+    assert s["xai"] == {"api_key": "", "model": "grok-4.7"}
+    for key in ("xai", "openai", "anthropic", "bedrock", "ollama", "openrouter"):
         assert key in s
     assert s["bedrock"]["region"] == "us-west-2"
 

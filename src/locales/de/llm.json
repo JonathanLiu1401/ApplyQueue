@@ -4,8 +4,12 @@
   "selectProvider": "Anbieter auswählen",
   "configuration": "{{provider}}-Konfiguration",
   "providers": {
+    "xai": {
+      "name": "xAI Grok (Empfohlen)",
+      "description": "Grok-4.x-Modelle mit Bildverständnis und Tool-Nutzung über einen xAI-API-Schlüssel"
+    },
     "openrouter": {
-      "name": "OpenRouter (Empfohlen)",
+      "name": "OpenRouter",
       "description": "100+ Vision-Modelle (GPT, Claude, Gemini, Qwen, Llama) über einen einzelnen API-Schlüssel"
     },
     "openai": {
@@ -72,7 +76,15 @@
       "step4": "Kopieren Sie den Schlüssel und fügen Sie ihn unten ein. Er beginnt mit sk-or-v1-.",
       "note": "OpenRouter bietet Zugang zu 100+ Modellen mit einem einzigen Schlüssel. Credits unter openrouter.ai/credits hinzufügen. Preise variieren je nach Modell."
     },
-    "note": "Hinweis:"
+    "note": "Hinweis:",
+    "xai": {
+      "step1": "Öffne die xAI-Konsole und melde dich mit deinem X- oder xAI-Konto an.",
+      "step1Link": "console.x.ai",
+      "step2": "Öffne „API Keys“ und klicke auf „Create API key“.",
+      "step3": "Füge unter „Billing“ Guthaben oder eine Zahlungsmethode hinzu, falls noch keine vorhanden ist.",
+      "step4": "Kopiere den Schlüssel und füge ihn unten ein. Er beginnt mit xai-.",
+      "note": "Die xAI-API wird getrennt von SuperGrok oder X Premium abgerechnet. Um stattdessen ein Grok-Abo zu nutzen, siehe „Use your AI subscription“ unten."
+    }
   },
   "ollama": {
     "serverUrlHint": "Die URL, unter der Ihr Ollama-Server läuft.",
@@ -93,5 +105,13 @@
     "testConnection": "Verbindung testen",
     "connectionSuccessful": "Verbindung erfolgreich!",
     "connectionFailed": "Verbindung fehlgeschlagen."
+  },
+  "xai": {
+    "keyLabel": "xAI-API-Schlüssel",
+    "keyHint": "Dein Schlüssel wird nur auf diesem Computer gespeichert. Erhältlich unter",
+    "modelLabel": "Grok-Modell",
+    "refreshModels": "Grok-Modelle aktualisieren",
+    "modelsFromApi": "{{count}} Grok-Modelle für diesen Schlüssel verfügbar.",
+    "modelsFallback": "Standard-Grok-Modelle."
   }
 }

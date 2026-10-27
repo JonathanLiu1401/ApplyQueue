@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import sys
 import urllib.request
 from pathlib import Path
@@ -39,15 +40,35 @@ def world(tmp_path_factory):
     llm = FakeOpenAI({"name": PROFILE["name"], "email": PROFILE["email"], "phone": PROFILE["phone"],
                       "current_role": PROFILE["current_role"], "address": PROFILE["address"]},
                      must_contain="Example Labs")
-    env = {"APPLYQUEUE_E2E_MOCK_MAIL": mail.base, "APPLYQUEUE_E2E_MOCK_GITHUB": gh.url}
+    env = {"APPLYQUEUE_E2E_MOCK_MAIL": mail.base, "APPLYQUEUE_E2E_MOCK_GITHUB": gh.url,
+           # the xAI provider's /v1/models and chat calls go to the loopback fake, never api.x.ai
+           "APPLYQUEUE_E2E_MOCK_XAI": llm.base.removesuffix("/v1")}
+    # CI sets APPLYQUEUE_E2E_ARTIFACTS: a Playwright trace + the sidecar log land there and are
+    # uploaded when the step fails (only fake test data: the persona, a fake key, the test token).
+    artifacts = os.environ.get("APPLYQUEUE_E2E_ARTIFACTS")
     with Stack(base / "data", pick=resume, env=env) as st, pw.sync_playwright() as p:
         browser = p.chromium.launch()
-        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        context = browser.new_context(viewport={"width": 1440, "height": 1000})
+        if artifacts:
+            context.tracing.start(screenshots=True, snapshots=True, sources=False)
+        page = context.new_page()
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.add_init_script(st.init_script())
-        yield {"st": st, "page": page, "resume": resume, "mail": mail, "gh": gh, "llm": llm, "errors": errors}
-        browser.close()
+        try:
+            yield {"st": st, "page": page, "resume": resume, "mail": mail, "gh": gh, "llm": llm,
+                   "errors": errors, "tmp": base}
+        finally:
+            if artifacts:
+                out = Path(artifacts)
+                out.mkdir(parents=True, exist_ok=True)
+                try:
+                    context.tracing.stop(path=str(out / "ui-flows-trace.zip"))
+                except Exception as e:  # never mask the real test failure
+                    print(f"trace not saved: {e}")
+            browser.close()
+    if artifacts and st.log.exists():
+        shutil.copyfile(st.log, Path(artifacts) / "ui-flows-sidecar.log")
     mail.close()
     gh.close()
     llm.close()
@@ -284,6 +305,68 @@ def test_sync_sign_in_private_repo_and_public_refused(world):
                            capture_output=True, text=True).stdout
     assert after == heads, "pushed to a public repo"
     gh.set_visibility(full, "private")
+
+
+def _fake_claude(tmp: Path) -> Path:
+    """A stand-in `claude` binary (tests/fixtures/fake_clis) so the opt-in terms gate can be shown."""
+    fake = ROOT / "tests" / "fixtures" / "fake_clis" / "fake_cli.py"
+    if sys.platform.startswith("win"):
+        shim = tmp / "claude.cmd"
+        shim.write_text(f'@echo off\r\n"{sys.executable}" "{fake}" --as claude --mode stream %*\r\n')
+    else:
+        shim = tmp / "claude"
+        shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{fake}" --as claude --mode stream "$@"\n')
+        shim.chmod(0o755)
+    return shim
+
+
+def test_grok_provider_and_ai_subscription_section(world):
+    """xAI/Grok is the recommended provider (key, live model list, test connection through the
+    sidecar to a loopback xAI) and Settings shows "Use your AI subscription" with the Claude gate."""
+    st, page, llm = world["st"], world["page"], world["llm"]
+    before = st.api("GET", "/settings/llm")
+    goto(page, st, "/llm")
+    grok = page.get_by_text("xAI Grok (Recommended)", exact=True)
+    grok.wait_for(timeout=30000)
+    assert page.get_by_role("radio").first.get_attribute("value") == "xai"
+    grok.click()
+    page.get_by_role("textbox", name="xAI API key").fill("xai-test-not-a-key")
+    # the model list comes from GET /v1/models on the (mock) xAI endpoint, via the sidecar
+    page.locator("#xai-model option[value='fake-model']").wait_for(state="attached", timeout=30000)
+    page.get_by_test_id("xai-models-source").get_by_text(re.compile("Grok models available")).wait_for()
+    page.select_option("#xai-model", "fake-model")
+    _until(lambda: (st.api("GET", "/settings/llm").get("xai") or {}).get("model") == "fake-model")
+    saved = st.api("GET", "/settings/llm")
+    assert saved["provider"] == "xai" and saved["xai"]["api_key"] == "xai-test-not-a-key"
+    assert st.api("GET", "/setup/status")["llm"] is True
+    page.get_by_role("button", name="Test Connection").click()
+    page.get_by_text(re.compile("Model responded")).wait_for(timeout=60000)
+    assert "hello" in llm.prompts[-1]
+    # the subscription section sits under the provider form and on Settings
+    page.get_by_test_id("ai-subscription-section").wait_for()
+    goto(page, st, "/settings")
+    sec = page.get_by_test_id("ai-subscription-section")
+    sec.wait_for(timeout=30000)
+    page.get_by_text("Use your AI subscription", exact=True).wait_for()
+    for cli in ("grok", "cursor", "codex", "claude"):
+        sec.get_by_test_id(f"backend-{cli}").wait_for(timeout=30000)
+    assert sec.get_by_role("radio", name="API key provider").is_checked()
+    assert sec.get_by_role("button", name=re.compile(r"Copy: (curl|irm|npm) ")).count() >= 4
+    # Claude Code is opt-in behind a terms warning (a fake `claude` stands in for the real CLI)
+    shim = _fake_claude(world["tmp"])
+    st.api("PUT", "/agents/backends/claude", {"path": str(shim)})
+    try:
+        page.reload()
+        sec.get_by_test_id("installed-claude").get_by_text(re.compile("Installed")).wait_for(timeout=30000)
+        sec.get_by_role("radio", name="Claude Code").click()
+        dialog = page.get_by_role("dialog", name="Claude Code terms")
+        dialog.get_by_text("Before you turn on Claude Code").wait_for()
+        assert st.api("GET", "/agents/backends")["selected"] == "browser_use"
+        dialog.get_by_role("button", name="Cancel").click()
+        assert st.api("GET", "/agents/backends")["selected"] == "browser_use"
+    finally:
+        st.api("PUT", "/agents/backends/claude", {"path": ""})
+        st.api("PUT", "/settings/llm", before)
 
 
 def test_no_uncaught_page_errors(world):

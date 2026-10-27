@@ -97,6 +97,27 @@ def test_detect_finds_shim_on_path(monkeypatch, tmp_path):
     assert info["installed"] and info["auth"]["state"] == "logged_in"
 
 
+def test_install_and_login_steps_are_official_commands(monkeypatch):
+    """Every runnable CLI ships copyable install + sign-in steps; none of them reads a token."""
+    for env in ("XAI_API_KEY", "CURSOR_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+        monkeypatch.delenv(env, raising=False)
+    want = {"grok": ("https://x.ai/cli/install.sh", "grok login"),
+            "cursor": ("https://cursor.com/install", "agent login"),
+            "codex": ("npm install -g @openai/codex", "codex login"),
+            "claude": ("npm install -g @anthropic-ai/claude-code", "claude auth login")}
+    for vendor, (install, login) in want.items():
+        info = detect(SPECS[vendor], {"command": fake_cmd(vendor, "stream")})
+        steps = info["install_steps"] + info["login_steps"]
+        assert all(set(s) == {"label", "command"} and s["command"] for s in steps)
+        assert any(install in s["command"] for s in info["install_steps"])
+        assert any(s["command"] == login for s in info["login_steps"])
+        text = json.dumps(steps).lower()
+        assert "auth.json" not in text and "credentials" not in text and ".claude" not in text
+    assert any("--device-auth" in s["command"] for s in detect(SPECS["codex"], {})["login_steps"])
+    gem = detect(SPECS["gemini"], {})
+    assert gem["install_steps"] == [] and gem["login_steps"] == []  # API key only, no Gemini CLI OAuth
+
+
 def test_list_backends_marks_selected():
     rows = list_backends({"agent_backend": "cli:codex", "cli_backends": {}}, check_auth=False)
     assert [r["id"] for r in rows] == ["grok", "cursor", "codex", "claude", "gemini"]

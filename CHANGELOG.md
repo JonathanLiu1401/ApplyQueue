@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-10-26
+
+### Added
+- xAI Grok as a first-class, recommended LLM provider: an xAI API key field stored locally like the other provider keys (never logged or synced), a Grok model picker loaded live from xAI `GET /v1/models` with a static fallback, Test Connection, and requests routed to `https://api.x.ai/v1`. New installs default to xAI.
+- "Use your AI subscription" in Settings (and under the AI provider page): Grok Build CLI, Claude Code, Codex CLI and Cursor CLI cards showing whether each is installed (binary + version) and signed in (via the CLI's own status command; ApplyQueue never reads or copies their token files), with copyable install and sign-in steps and a selector that routes agent runs through the CLI. The API-key provider stays the default.
+- Claude Code is opt-in only behind a terms warning (enforced by the sidecar too) and runs the unmodified official CLI; Codex uses "Sign in with ChatGPT" with the token kept on the device; Gemini stays API-key only.
+- UI e2e CI steps upload the Playwright trace and the sidecar log when they fail.
+
+### Changed
+- `/llm/test` scrubs provider error text before returning or logging it, so a key echoed by a provider never reaches the UI or the logs.
+
 ## [1.4.0](https://github.com/jaimaann/LangHire/compare/v1.3.0...v1.4.0) - 2026-05-06
 
 ### Added

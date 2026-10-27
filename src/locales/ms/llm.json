@@ -4,8 +4,12 @@
   "selectProvider": "Pilih Pembekal",
   "configuration": "Konfigurasi {{provider}}",
   "providers": {
+    "xai": {
+      "name": "xAI Grok (Disyorkan)",
+      "description": "Model Grok 4.x dengan penglihatan dan penggunaan alat melalui kunci API xAI"
+    },
     "openrouter": {
-      "name": "OpenRouter (Disyorkan)",
+      "name": "OpenRouter",
       "description": "100+ model penglihatan (GPT, Claude, Gemini, Qwen, Llama) melalui satu kunci API"
     },
     "openai": {
@@ -72,7 +76,15 @@
       "step4": "Salin kunci dan tampal di bawah. Ia bermula dengan sk-or-v1-.",
       "note": "OpenRouter memberi akses kepada 100+ model dengan satu kunci. Tambah kredit di openrouter.ai/credits. Harga berbeza mengikut model."
     },
-    "note": "Nota:"
+    "note": "Nota:",
+    "xai": {
+      "step1": "Pergi ke konsol xAI dan log masuk dengan akaun X atau xAI anda.",
+      "step1Link": "console.x.ai",
+      "step2": "Buka API Keys dan klik \"Create API key\".",
+      "step3": "Tambah kredit atau kaedah pembayaran di Billing jika pasukan anda belum ada.",
+      "step4": "Salin kunci dan tampal di bawah. Ia bermula dengan xai-.",
+      "note": "API xAI dibilkan berasingan daripada SuperGrok atau X Premium. Untuk menggunakan langganan Grok, lihat \"Use your AI subscription\" di bawah."
+    }
   },
   "ollama": {
     "serverUrlHint": "URL di mana pelayan Ollama anda berjalan.",
@@ -93,5 +105,13 @@
     "testConnection": "Uji Sambungan",
     "connectionSuccessful": "Sambungan berjaya!",
     "connectionFailed": "Sambungan gagal."
+  },
+  "xai": {
+    "keyLabel": "Kunci API xAI",
+    "keyHint": "Kunci anda disimpan pada komputer ini sahaja. Dapatkan di",
+    "modelLabel": "Model Grok",
+    "refreshModels": "Muat semula model Grok",
+    "modelsFromApi": "{{count}} model Grok tersedia untuk kunci ini.",
+    "modelsFallback": "Model Grok lalai."
   }
 }

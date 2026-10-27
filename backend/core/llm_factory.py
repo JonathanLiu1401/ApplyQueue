@@ -1,8 +1,23 @@
 """
 Multi-provider LLM factory.
 Creates browser_use chat models from user settings.
-Supports: OpenAI, Anthropic (direct), AWS Bedrock, Google Gemini.
+Supports: xAI / Grok (recommended), OpenAI, Anthropic (direct), AWS Bedrock, Google Gemini,
+OpenRouter, Ollama and any OpenAI-compatible server.
 """
+
+# xAI's API is OpenAI-compatible (chat completions, tools, structured output, vision).
+XAI_BASE_URL = "https://api.x.ai/v1"
+XAI_DEFAULT_MODEL = "grok-4.7"
+# Shown when /v1/models cannot be reached (no key yet, offline). Newest first.
+XAI_FALLBACK_MODELS = ["grok-4.7", "grok-4.6", "grok-4.5", "grok-4.3",
+                       "grok-4.20-non-reasoning", "grok-4.20-reasoning"]
+# Model families /v1/models lists that cannot drive a browser agent (images, video, voice, embeddings).
+_XAI_NON_CHAT = ("imagine", "image", "video", "voice", "tts", "embed", "realtime")
+
+
+def xai_base_url() -> str:
+    """xAI endpoint; the packaged-app e2e suite may point it at a loopback mock (core.e2e_hooks)."""
+    return XAI_BASE_URL
 
 
 class _PatchedSession:
@@ -24,7 +39,16 @@ def create_llm(settings: dict):
     """Create a browser_use BaseChatModel from settings dict."""
     provider = settings.get("provider", "openai")
 
-    if provider == "openai":
+    if provider == "xai":
+        from browser_use.llm import ChatOpenAI
+        cfg = settings.get("xai") or {}
+        return ChatOpenAI(
+            model=(cfg.get("model") or XAI_DEFAULT_MODEL).strip(),
+            api_key=(cfg.get("api_key") or "").strip(),
+            base_url=xai_base_url(),
+        )
+
+    elif provider == "openai":
         from browser_use.llm import ChatOpenAI
         cfg = settings.get("openai", {})
         return ChatOpenAI(
@@ -115,6 +139,48 @@ def create_llm(settings: dict):
 
     else:
         raise ValueError(f"Unknown LLM provider: {provider}")
+
+
+def _is_chat_model(m: dict) -> bool:
+    mid = str(m.get("id") or "").lower()
+    if not mid or any(t in mid for t in _XAI_NON_CHAT):
+        return False
+    outs = m.get("output_modalities")
+    return not isinstance(outs, list) or not outs or "text" in outs
+
+
+async def list_xai_models(api_key: str, timeout: float = 10.0) -> dict:
+    """Grok chat models available to this key, from xAI's GET /v1/models.
+
+    Returns {"success", "source": "api"|"fallback", "models": [ids], "message"}. Without a key, or
+    when the call fails, the static fallback list is returned with success False. The key is only
+    sent to xAI in the Authorization header; it is never logged or echoed back.
+    """
+    import httpx
+    key = (api_key or "").strip()
+    fallback = {"success": False, "source": "fallback", "models": list(XAI_FALLBACK_MODELS)}
+    if not key:
+        return {**fallback, "message": "Add your xAI API key to load the models it can use."}
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(f"{xai_base_url()}/models", headers={"Authorization": f"Bearer {key}"})
+    except Exception:
+        return {**fallback, "message": "Cannot reach the xAI API. Showing the default Grok models."}
+    if resp.status_code in (401, 403):
+        return {**fallback, "message": "xAI did not accept this API key."}
+    if resp.status_code != 200:
+        return {**fallback, "message": f"xAI returned HTTP {resp.status_code}. Showing the default Grok models."}
+    try:
+        data = resp.json()
+    except ValueError:
+        return {**fallback, "message": "Unexpected reply from xAI. Showing the default Grok models."}
+    rows = data.get("data") if isinstance(data, dict) else None
+    ids = sorted({str(m["id"]) for m in (rows or []) if isinstance(m, dict) and _is_chat_model(m)},
+                 key=lambda i: (i not in XAI_FALLBACK_MODELS,
+                                XAI_FALLBACK_MODELS.index(i) if i in XAI_FALLBACK_MODELS else 0, i))
+    if not ids:
+        return {**fallback, "message": "xAI listed no chat models for this key. Showing the default Grok models."}
+    return {"success": True, "source": "api", "models": ids, "message": f"{len(ids)} Grok models available"}
 
 
 async def test_connection(llm) -> str:

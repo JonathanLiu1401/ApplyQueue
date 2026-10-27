@@ -4,8 +4,12 @@
   "selectProvider": "プロバイダーを選択",
   "configuration": "{{provider}}の設定",
   "providers": {
+    "xai": {
+      "name": "xAI Grok（推奨）",
+      "description": "xAI APIキーで使える、画像理解とツール利用に対応したGrok 4.xモデル"
+    },
     "openrouter": {
-      "name": "OpenRouter（推奨）",
+      "name": "OpenRouter",
       "description": "1つのAPIキーで100以上のビジョンモデル（GPT, Claude, Gemini, Qwen, Llama）"
     },
     "openai": {
@@ -72,7 +76,15 @@
       "step4": "キーをコピーして下に貼り付けてください。sk-or-v1-で始まります。",
       "note": "OpenRouterは1つのキーで100以上のモデルにアクセスできます。openrouter.ai/creditsでクレジットを追加してください。料金はモデルによって異なります。"
     },
-    "note": "注意:"
+    "note": "注意:",
+    "xai": {
+      "step1": "xAIコンソールを開き、XまたはxAIアカウントでサインインします。",
+      "step1Link": "console.x.ai",
+      "step2": "API Keysを開き、「Create API key」をクリックします。",
+      "step3": "チームに支払い方法がない場合は、Billingでクレジットまたは支払い方法を追加します。",
+      "step4": "キーをコピーして下に貼り付けます。xai- で始まります。",
+      "note": "xAI APIはSuperGrokやX Premiumとは別に課金されます。Grokのサブスクリプションを使う場合は、下の「Use your AI subscription」を参照してください。"
+    }
   },
   "ollama": {
     "serverUrlHint": "Ollamaサーバーが実行されているURL。",
@@ -93,5 +105,13 @@
     "testConnection": "接続テスト",
     "connectionSuccessful": "接続成功！",
     "connectionFailed": "接続失敗。"
+  },
+  "xai": {
+    "keyLabel": "xAI APIキー",
+    "keyHint": "キーはこのコンピューターにのみ保存されます。取得先：",
+    "modelLabel": "Grokモデル",
+    "refreshModels": "Grokモデルを再取得",
+    "modelsFromApi": "このキーで使えるGrokモデル：{{count}}件",
+    "modelsFallback": "既定のGrokモデル。"
   }
 }

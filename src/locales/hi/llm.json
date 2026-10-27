@@ -4,8 +4,12 @@
   "selectProvider": "प्रदाता चुनें",
   "configuration": "{{provider}} कॉन्फ़िगरेशन",
   "providers": {
+    "xai": {
+      "name": "xAI Grok (अनुशंसित)",
+      "description": "xAI API कुंजी के ज़रिए विज़न और टूल उपयोग वाले Grok 4.x मॉडल"
+    },
     "openrouter": {
-      "name": "OpenRouter (अनुशंसित)",
+      "name": "OpenRouter",
       "description": "एक ही API कुंजी से 100+ विज़न मॉडल (GPT, Claude, Gemini, Qwen, Llama)"
     },
     "openai": {
@@ -72,7 +76,15 @@
       "step4": "कुंजी कॉपी करें और नीचे पेस्ट करें। यह sk-or-v1- से शुरू होती है।",
       "note": "OpenRouter एक ही कुंजी से 100+ मॉडल तक पहुँच देता है। openrouter.ai/credits पर क्रेडिट जोड़ें। मूल्य निर्धारण मॉडल के अनुसार भिन्न होता है।"
     },
-    "note": "नोट:"
+    "note": "नोट:",
+    "xai": {
+      "step1": "xAI कंसोल पर जाएँ और अपने X या xAI खाते से साइन इन करें।",
+      "step1Link": "console.x.ai",
+      "step2": "API Keys खोलें और \"Create API key\" पर क्लिक करें।",
+      "step3": "अगर आपकी टीम के पास नहीं है तो Billing में क्रेडिट या भुगतान विधि जोड़ें।",
+      "step4": "कुंजी कॉपी करें और नीचे पेस्ट करें। यह xai- से शुरू होती है।",
+      "note": "xAI API का बिल SuperGrok या X Premium से अलग आता है। इसके बजाय Grok सदस्यता इस्तेमाल करने के लिए नीचे \"Use your AI subscription\" देखें।"
+    }
   },
   "ollama": {
     "serverUrlHint": "URL जहाँ आपका Ollama सर्वर चल रहा है।",
@@ -93,5 +105,13 @@
     "testConnection": "कनेक्शन परीक्षण",
     "connectionSuccessful": "कनेक्शन सफल!",
     "connectionFailed": "कनेक्शन विफल।"
+  },
+  "xai": {
+    "keyLabel": "xAI API कुंजी",
+    "keyHint": "आपकी कुंजी केवल इसी कंप्यूटर पर सहेजी जाती है। यहाँ से पाएँ",
+    "modelLabel": "Grok मॉडल",
+    "refreshModels": "Grok मॉडल रीफ़्रेश करें",
+    "modelsFromApi": "इस कुंजी के लिए {{count}} Grok मॉडल उपलब्ध हैं।",
+    "modelsFallback": "डिफ़ॉल्ट Grok मॉडल।"
   }
 }

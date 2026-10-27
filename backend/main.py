@@ -99,7 +99,7 @@ async def lifespan(app: FastAPI):
     time.sleep(2)
     _kill_browser_processes()
 
-app = FastAPI(title="ApplyQueue Backend", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="ApplyQueue Backend", version="0.1.1", lifespan=lifespan)
 
 # ── Auth token (generated per-session, written to data dir for frontend) ──
 import secrets as _secrets
@@ -215,7 +215,7 @@ class _RateLimiter:
         return True
 
 _rate_limiter = _RateLimiter(max_calls=60, window_seconds=60)
-_rate_limited_prefixes = ("/jobs/collect", "/apply/start", "/apply/stop", "/llm/test", "/auth/login")
+_rate_limited_prefixes = ("/jobs/collect", "/apply/start", "/apply/stop", "/llm/test", "/llm/xai-models", "/auth/login")
 
 _ALLOWED_ORIGINS = {"http://localhost:1420", "tauri://localhost", "http://tauri.localhost", "https://tauri.localhost", "http://127.0.0.1:1420"}
 
@@ -625,7 +625,7 @@ async def health():
     all_ok = db_ok and chromium_ok and llm_configured
     return {
         "status": "ok" if all_ok else "degraded",
-        "version": "0.1.0",
+        "version": "0.1.1",
         "app": "applyqueue",
         "pid": os.getpid(),
         "orphaned": _orphaned(),
@@ -680,7 +680,8 @@ async def test_llm(settings: dict):
         result = await test_connection(llm)
         return {"success": True, "message": result}
     except Exception as e:
-        msg = str(e)
+        from core.token_guard import scrub
+        msg = scrub(str(e))  # provider errors can echo part of a key; never return or log it
         if "api_key" in msg.lower() or "unauthorized" in msg.lower() or "401" in msg:
             return {"success": False, "message": "Invalid API key or unauthorized. Check your credentials."}
         if "timeout" in msg.lower() or "connect" in msg.lower():
@@ -690,8 +691,19 @@ async def test_llm(settings: dict):
         if isinstance(e, ModelProviderError):
             return {"success": False, "message": f"LLM Provider Error: {msg}"}
             
-        _log.error(f"LLM test failed: {e}", exc_info=True)
+        _log.error(f"LLM test failed: {type(e).__name__}: {msg}")
         return {"success": False, "message": f"LLM test failed: {msg}"}
+
+
+@app.post("/llm/xai-models")
+async def list_xai_models(body: dict):
+    """Grok models for the key in the form (or the saved one): xAI /v1/models, else a static list."""
+    from core.llm_factory import list_xai_models as _list
+
+    key = str((body or {}).get("api_key") or "").strip()
+    if not key:
+        key = str((load_llm_settings().get("xai") or {}).get("api_key") or "").strip()
+    return await _list(key)
 
 
 @app.post("/llm/ollama-models")
@@ -2799,7 +2811,9 @@ async def get_setup_status():
     profile_done = bool(_txt(profile.get("name", "")))
     llm_done = False
     provider = llm.get("provider", "")
-    if provider == "openai":
+    if provider == "xai":
+        llm_done = bool(_txt((llm.get("xai") or {}).get("api_key", "")))
+    elif provider == "openai":
         llm_done = bool(_txt((llm.get("openai") or {}).get("api_key", "")))
     elif provider == "anthropic":
         llm_done = bool(_txt((llm.get("anthropic") or {}).get("api_key", "")))

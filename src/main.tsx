@@ -23,7 +23,7 @@ if (SENTRY_DSN && isTelemetryOptedIn()) {
   Sentry.init({
     dsn: SENTRY_DSN,
     environment: import.meta.env.MODE,
-    release: "applyqueue@0.1.0",
+    release: "applyqueue@0.1.1",
     tracesSampleRate: 0,
     sendDefaultPii: false,
     beforeSendTransaction() {

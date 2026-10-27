@@ -29,7 +29,12 @@ const base = {
 };
 
 const backends = [
-  { ...base, id: "grok", name: "Grok Build CLI" },
+  { ...base, id: "grok", name: "Grok Build CLI", version: "grok 0.1.42",
+    install_steps: [{ label: "macOS / Linux", command: "curl -fsSL https://x.ai/cli/install.sh | bash" }],
+    login_steps: [{ label: "Sign in", command: "grok login" }] },
+  { ...base, id: "codex", name: "Codex CLI", installed: false, version: null, path: null, auth: { state: "unknown" },
+    install_steps: [{ label: "npm", command: "npm install -g @openai/codex" }],
+    login_steps: [{ label: "Sign in with ChatGPT", command: "codex login" }] },
   { ...base, id: "claude", name: "Claude Code", requires_terms: true, terms_text: "Uses your own Claude login.", auth: { state: "logged_out" } },
   { ...base, id: "gemini", name: "Gemini", runnable: false, installed: false, auth: { state: "not_applicable" } },
 ];
@@ -63,6 +68,46 @@ describe("AgentBackendsSection", () => {
     expect(screen.getByText("Uses your own Claude login.")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /I understand/ }));
     expect(api.updateAgentBackend).toHaveBeenCalledWith("claude", { accept_terms: true, select: true });
+  });
+
+  it("is the 'Use your AI subscription' section with the API-key provider as default", async () => {
+    render(<AgentBackendsSection />);
+    expect(await screen.findByText("Use your AI subscription")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "API key provider" })).toBeChecked();
+    expect(screen.getByTestId("installed-grok")).toHaveTextContent("Installed · grok 0.1.42");
+    expect(screen.getByTestId("auth-grok")).toHaveTextContent("Signed in");
+    expect(screen.getByTestId("installed-codex")).toHaveTextContent("Not installed");
+    expect(screen.getByRole("radio", { name: "Codex CLI" })).toBeDisabled();
+    expect(screen.getByText("Opt-in")).toBeInTheDocument();
+  });
+
+  it("copies install and login commands", async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    render(<AgentBackendsSection />);
+    await userEvent.click(await screen.findByRole("button", { name: "Copy: npm install -g @openai/codex" }));
+    expect(writeText).toHaveBeenCalledWith("npm install -g @openai/codex");
+    expect(await screen.findByText("Copied")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Copy: codex login" }));
+    expect(writeText).toHaveBeenCalledWith("codex login");
+    expect(screen.getByRole("button", { name: "Copy: grok login" })).toBeInTheDocument();
+  });
+
+  it("switches back to the API-key provider", async () => {
+    vi.mocked(api.getAgentBackends).mockResolvedValue({ selected: "cli:grok", backends } as never);
+    render(<AgentBackendsSection />);
+    expect(await screen.findByRole("radio", { name: "Grok Build CLI" })).toBeChecked();
+    await userEvent.click(screen.getByRole("radio", { name: "API key provider" }));
+    expect(api.selectAgentBackend).toHaveBeenCalledWith("browser_use");
+  });
+
+  it("does not select Claude Code when the terms are cancelled", async () => {
+    render(<AgentBackendsSection />);
+    await userEvent.click(await screen.findByRole("radio", { name: "Claude Code" }));
+    expect(screen.getByRole("dialog", { name: "Claude Code terms" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(api.updateAgentBackend).not.toHaveBeenCalledWith("claude", expect.anything());
   });
 
   it("shows the Grok Bot setup prompt", async () => {

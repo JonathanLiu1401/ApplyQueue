@@ -4,8 +4,12 @@
   "selectProvider": "اختر المزود",
   "configuration": "تكوين {{provider}}",
   "providers": {
+    "xai": {
+      "name": "xAI Grok (موصى به)",
+      "description": "نماذج Grok 4.x مع الرؤية واستخدام الأدوات عبر مفتاح API من xAI"
+    },
     "openrouter": {
-      "name": "OpenRouter (موصى به)",
+      "name": "OpenRouter",
       "description": "100+ نموذج رؤية (GPT, Claude, Gemini, Qwen, Llama) عبر مفتاح API واحد"
     },
     "openai": {
@@ -72,7 +76,15 @@
       "step4": "انسخ المفتاح والصقه أدناه. يبدأ بـ sk-or-v1-.",
       "note": "يمنحك OpenRouter الوصول إلى 100+ نموذج بمفتاح واحد. أضف رصيداً في openrouter.ai/credits. تختلف الأسعار حسب النموذج."
     },
-    "note": "ملاحظة:"
+    "note": "ملاحظة:",
+    "xai": {
+      "step1": "انتقل إلى وحدة تحكم xAI وسجّل الدخول بحساب X أو xAI.",
+      "step1Link": "console.x.ai",
+      "step2": "افتح API Keys وانقر على \"Create API key\".",
+      "step3": "أضف رصيدًا أو وسيلة دفع في Billing إذا لم يكن لدى فريقك واحدة.",
+      "step4": "انسخ المفتاح والصقه أدناه. يبدأ بـ xai-.",
+      "note": "تُحتسب واجهة xAI API بشكل منفصل عن SuperGrok أو X Premium. لاستخدام اشتراك Grok بدلًا من ذلك، راجع \"Use your AI subscription\" أدناه."
+    }
   },
   "ollama": {
     "serverUrlHint": "عنوان URL حيث يعمل خادم Ollama الخاص بك.",
@@ -93,5 +105,13 @@
     "testConnection": "اختبار الاتصال",
     "connectionSuccessful": "الاتصال ناجح!",
     "connectionFailed": "فشل الاتصال."
+  },
+  "xai": {
+    "keyLabel": "مفتاح xAI API",
+    "keyHint": "يُحفظ مفتاحك على هذا الكمبيوتر فقط. احصل عليه من",
+    "modelLabel": "نموذج Grok",
+    "refreshModels": "تحديث نماذج Grok",
+    "modelsFromApi": "{{count}} من نماذج Grok متاحة لهذا المفتاح.",
+    "modelsFallback": "نماذج Grok الافتراضية."
   }
 }

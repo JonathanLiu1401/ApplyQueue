@@ -7,6 +7,7 @@ import {
   saveLLMSettings,
   testLLMConnection,
   fetchOllamaModels,
+  fetchXaiModels,
 } from "../../lib/api";
 import { trackEvent } from "../../lib/analytics";
 
@@ -24,12 +25,14 @@ vi.mock("../../lib/api", () => ({
   saveLLMSettings: vi.fn(),
   testLLMConnection: vi.fn(),
   fetchOllamaModels: vi.fn(),
+  fetchXaiModels: vi.fn(),
 }));
 
 const mockGetLLMSettings = vi.mocked(getLLMSettings);
 const mockSaveLLMSettings = vi.mocked(saveLLMSettings);
 const mockTestLLMConnection = vi.mocked(testLLMConnection);
 const mockFetchOllamaModels = vi.mocked(fetchOllamaModels);
+const mockFetchXaiModels = vi.mocked(fetchXaiModels);
 const mockTrackEvent = vi.mocked(trackEvent);
 
 const baseSettings = {
@@ -65,6 +68,9 @@ describe("LLMSettingsForm", () => {
     mockSaveLLMSettings.mockResolvedValue({ success: true } as never);
     mockTestLLMConnection.mockResolvedValue({ success: true, message: "ok" } as never);
     mockFetchOllamaModels.mockResolvedValue({ success: true, models: [] } as never);
+    mockFetchXaiModels.mockResolvedValue({
+      success: false, source: "fallback", models: ["grok-4.7", "grok-4.6"], message: "Add your xAI API key",
+    } as never);
     stubFetch();
   });
 
@@ -81,7 +87,9 @@ describe("LLMSettingsForm", () => {
     await screen.findByText("selectProvider");
 
     const radios = screen.getAllByRole("radio");
-    expect(radios).toHaveLength(7);
+    expect(radios).toHaveLength(8);
+    // xAI / Grok is listed first and is the recommended provider.
+    expect(radios[0]).toHaveAttribute("value", "xai");
     const openrouter = screen.getByRole("radio", { name: /providers\.openrouter/ });
     expect(openrouter).toBeChecked();
     // OpenRouter config field (api key) is present.
@@ -352,6 +360,69 @@ describe("LLMSettingsForm", () => {
       expect(
         screen.getByPlaceholderText("meta-llama/Llama-3-70b-chat-hf"),
       ).toBeInTheDocument();
+    });
+  });
+
+  describe("xAI / Grok provider", () => {
+    const xaiSettings = () => ({ ...structuredClone(baseSettings), provider: "xai", xai: { api_key: "", model: "grok-4.7" } });
+
+    it("defaults to xAI when nothing is saved yet", async () => {
+      mockGetLLMSettings.mockResolvedValue({} as never);
+      render(<LLMSettingsForm />);
+      await screen.findByText("selectProvider");
+      expect(screen.getByRole("radio", { name: /providers\.xai/ })).toBeChecked();
+      expect(screen.getByTestId("xai-config")).toBeInTheDocument();
+    });
+
+    it("shows the key field and the fallback Grok models without a key", async () => {
+      mockGetLLMSettings.mockResolvedValue(xaiSettings() as never);
+      render(<LLMSettingsForm />);
+      const key = await screen.findByLabelText("xai.keyLabel");
+      expect(key).toHaveAttribute("type", "password");
+      await waitFor(() => expect(mockFetchXaiModels).toHaveBeenCalledWith(""));
+      const select = screen.getByLabelText(/xai\.modelLabel/) as HTMLSelectElement;
+      expect(select.value).toBe("grok-4.7");
+      expect(screen.getByTestId("xai-models-source")).toHaveTextContent("xai.modelsFallback");
+    });
+
+    it("loads models from xAI for the typed key and saves the picked model", async () => {
+      const user = userEvent.setup();
+      mockGetLLMSettings.mockResolvedValue(xaiSettings() as never);
+      mockFetchXaiModels.mockImplementation(async (k: string) =>
+        (k ? { success: true, source: "api", models: ["grok-4.7", "grok-5-preview"], message: "" }
+           : { success: false, source: "fallback", models: ["grok-4.7"], message: "" }) as never);
+      render(<LLMSettingsForm />);
+      await user.type(await screen.findByLabelText("xai.keyLabel"), "xai-test-not-a-key");
+      await waitFor(() => expect(mockFetchXaiModels).toHaveBeenCalledWith("xai-test-not-a-key"), { timeout: 3000 });
+      const select = (await screen.findByLabelText(/xai\.modelLabel/)) as HTMLSelectElement;
+      await waitFor(() => expect(within(select).getByRole("option", { name: "grok-5-preview" })).toBeInTheDocument());
+      expect(screen.getByTestId("xai-models-source")).toHaveTextContent("xai.modelsFromApi");
+      await user.selectOptions(select, "grok-5-preview");
+      await waitFor(() =>
+        expect(mockSaveLLMSettings).toHaveBeenCalledWith(
+          expect.objectContaining({ provider: "xai", xai: { api_key: "xai-test-not-a-key", model: "grok-5-preview" } }),
+        ),
+      );
+    });
+
+    it("keeps a saved model that is not in the list", async () => {
+      mockGetLLMSettings.mockResolvedValue({ ...xaiSettings(), xai: { api_key: "", model: "grok-custom" } } as never);
+      render(<LLMSettingsForm />);
+      const select = (await screen.findByLabelText(/xai\.modelLabel/)) as HTMLSelectElement;
+      expect(select.value).toBe("grok-custom");
+    });
+
+    it("Test Connection sends the xAI settings", async () => {
+      const user = userEvent.setup();
+      mockGetLLMSettings.mockResolvedValue({ ...xaiSettings(), xai: { api_key: "xai-k", model: "grok-4.6" } } as never);
+      mockTestLLMConnection.mockResolvedValue({ success: true, message: "Grok says hi" } as never);
+      render(<LLMSettingsForm />);
+      await screen.findByTestId("xai-config");
+      await user.click(screen.getByRole("button", { name: /status\.testConnection/ }));
+      expect(await screen.findByText("Grok says hi")).toBeInTheDocument();
+      expect(mockTestLLMConnection).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: "xai", xai: { api_key: "xai-k", model: "grok-4.6" } }),
+      );
     });
   });
 });

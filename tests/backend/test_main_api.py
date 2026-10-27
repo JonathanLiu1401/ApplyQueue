@@ -547,6 +547,15 @@ class TestSetup:
         auth_client.put("/settings/llm", json={"provider": "openai_compatible", "openai_compatible": {"base_url": "https://api.together.xyz/v1", "api_key": "", "model": "m"}})
         assert auth_client.get("/setup/status").json()["llm"] is True
 
+    def test_setup_status_fresh_default_is_xai_not_done(self, auth_client):
+        """A fresh install defaults to xAI Grok (recommended) and the LLM step waits for its key."""
+        assert auth_client.get("/settings/llm").json()["provider"] == "xai"
+        assert auth_client.get("/setup/status").json()["llm"] is False
+
+    def test_setup_status_llm_done_for_xai(self, auth_client):
+        auth_client.put("/settings/llm", json={"provider": "xai", "xai": {"api_key": "xai-k", "model": "grok-4.7"}})
+        assert auth_client.get("/setup/status").json()["llm"] is True
+
     def test_setup_status_llm_not_done_when_gemini_key_blank(self, auth_client):
         auth_client.put("/settings/llm", json={"provider": "gemini", "gemini": {"api_key": "", "model": "gemini-2.5-pro"}})
         assert auth_client.get("/setup/status").json()["llm"] is False
@@ -612,6 +621,41 @@ class TestLLMEndpoints:
         resp = auth_client.post("/llm/test", json={"provider": "openai"})
         assert resp.status_code == 200
         assert resp.json() == {"success": True, "message": "pong"}
+
+    def test_xai_models_uses_body_key_then_saved_key(self, auth_client, monkeypatch):
+        """/llm/xai-models passes the typed key (else the saved one) to list_xai_models."""
+        from core import llm_factory
+        seen = []
+
+        async def _list(key, timeout=10.0):
+            seen.append(key)
+            return {"success": bool(key), "source": "api" if key else "fallback", "models": ["grok-4.7"],
+                    "message": "ok"}
+
+        monkeypatch.setattr(llm_factory, "list_xai_models", _list)
+        r = auth_client.post("/llm/xai-models", json={"api_key": " xai-typed "})
+        assert r.status_code == 200 and r.json()["models"] == ["grok-4.7"]
+        auth_client.put("/settings/llm", json={"provider": "xai", "xai": {"api_key": "xai-saved", "model": "grok-4.7"}})
+        auth_client.post("/llm/xai-models", json={})
+        assert seen == ["xai-typed", "xai-saved"]
+        assert "xai-saved" not in auth_client.post("/llm/xai-models", json={}).text
+
+    def test_xai_models_requires_auth(self, client):
+        assert client.post("/llm/xai-models", json={}).status_code == 401
+
+    def test_llm_test_never_echoes_or_logs_the_key(self, auth_client, monkeypatch, caplog):
+        """A provider error that quotes the key is scrubbed before it is returned or logged."""
+        from core import llm_factory
+        key = "xai-" + "A1b2C3d4" * 6
+
+        def _boom(_settings):
+            raise RuntimeError(f"bad request for key {key}")
+
+        monkeypatch.setattr(llm_factory, "create_llm", _boom)
+        with caplog.at_level("DEBUG"):
+            body = auth_client.post("/llm/test", json={"provider": "xai", "xai": {"api_key": key}}).json()
+        assert body["success"] is False
+        assert key not in body["message"] and key not in caplog.text
 
     def test_cover_letter_requires_description(self, auth_client):
         """/cover-letter/generate validates that a job description is present."""

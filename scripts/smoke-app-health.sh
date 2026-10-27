@@ -3,7 +3,7 @@
 # GET /health as the frozen (bundled) backend. Used by CI on Linux; macOS has
 # scripts/smoke-macos-app.sh (adds architecture checks), Windows scripts/smoke-windows-app.ps1.
 # Usage: scripts/smoke-app-health.sh <command> [args...]
-#   e.g. xvfb-run -a scripts/smoke-app-health.sh ./ApplyQueue_0.1.0_amd64.AppImage
+#   e.g. xvfb-run -a scripts/smoke-app-health.sh ./ApplyQueue_0.1.1_amd64.AppImage
 set -euo pipefail
 
 [ $# -ge 1 ] || { echo "usage: $0 <command> [args...]" >&2; exit 2; }

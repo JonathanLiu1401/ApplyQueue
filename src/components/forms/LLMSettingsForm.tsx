@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSafeTimeout } from "../../hooks/useSafeTimeout";
-import { TestTube, CheckCircle, XCircle, Loader2, ChevronDown, ChevronUp, ExternalLink } from "lucide-react";
-import { getLLMSettings, saveLLMSettings, testLLMConnection, fetchOllamaModels } from "../../lib/api";
+import { TestTube, CheckCircle, XCircle, Loader2, ChevronDown, ChevronUp, ExternalLink, RefreshCw } from "lucide-react";
+import { getLLMSettings, saveLLMSettings, testLLMConnection, fetchOllamaModels, fetchXaiModels } from "../../lib/api";
 import { trackEvent } from "../../lib/analytics";
 import type { LLMProvider, LLMSettings } from "../../lib/types";
 import { useTranslation } from "react-i18next";
 
 const PROVIDERS: { id: LLMProvider; nameKey: string; descKey: string }[] = [
+  { id: "xai", nameKey: "providers.xai.name", descKey: "providers.xai.description" },
   { id: "openrouter", nameKey: "providers.openrouter.name", descKey: "providers.openrouter.description" },
   { id: "openai", nameKey: "providers.openai.name", descKey: "providers.openai.description" },
   { id: "anthropic", nameKey: "providers.anthropic.name", descKey: "providers.anthropic.description" },
@@ -16,6 +17,9 @@ const PROVIDERS: { id: LLMProvider; nameKey: string; descKey: string }[] = [
   { id: "openai_compatible", nameKey: "providers.openai_compatible.name", descKey: "providers.openai_compatible.description" },
 ];
 
+/** Shown until xAI's /v1/models answers for the key (mirrors backend llm_factory.XAI_FALLBACK_MODELS). */
+const XAI_FALLBACK_MODELS = ["grok-4.7", "grok-4.6", "grok-4.5", "grok-4.3", "grok-4.20-non-reasoning", "grok-4.20-reasoning"];
+const XAI_DEFAULT_MODEL = "grok-4.7";
 const OPENAI_MODELS = ["gpt-5.4-nano", "gpt-5.4-mini", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"];
 const ANTHROPIC_MODELS = ["claude-sonnet-4-5", "claude-haiku-4-5", "claude-opus-4-5"];
 const GEMINI_MODELS = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"];
@@ -44,7 +48,8 @@ const BEDROCK_MODELS = [
 ];
 
 const defaultSettings: LLMSettings = {
-  provider: "openrouter",
+  provider: "xai",
+  xai: { api_key: "", model: XAI_DEFAULT_MODEL },
   openai: { api_key: "", model: "gpt-4o" },
   anthropic: { api_key: "", model: "claude-sonnet-4-5" },
   gemini: { api_key: "", model: "gemini-2.5-pro" },
@@ -57,6 +62,7 @@ const defaultSettings: LLMSettings = {
 const OR_CUSTOM = "__custom__";
 
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
+  xai: "xAI (Grok)",
   openai: "OpenAI",
   anthropic: "Anthropic",
   gemini: "Google Gemini",
@@ -86,6 +92,10 @@ export default function LLMSettingsForm({ onSaved, compact }: LLMSettingsFormPro
   const [openrouterModels, setOpenrouterModels] = useState<{ id: string; name: string; context: number; promptPrice: string; completionPrice: string }[]>([]);
   const [openrouterFetching, setOpenrouterFetching] = useState(false);
   const [openrouterCustom, setOpenrouterCustom] = useState(false);
+  const [xaiModels, setXaiModels] = useState<string[]>([]);
+  const [xaiFetching, setXaiFetching] = useState(false);
+  const [xaiInfo, setXaiInfo] = useState<{ source: "api" | "fallback"; message: string } | null>(null);
+  const xaiFetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ollamaFetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -100,6 +110,7 @@ export default function LLMSettingsForm({ onSaved, compact }: LLMSettingsFormPro
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       if (ollamaFetchTimer.current) clearTimeout(ollamaFetchTimer.current);
+      if (xaiFetchTimer.current) clearTimeout(xaiFetchTimer.current);
     };
   }, []);
 
@@ -121,6 +132,29 @@ export default function LLMSettingsForm({ onSaved, compact }: LLMSettingsFormPro
       loadOllamaModels(settings.ollama.base_url);
     }
   }, [settings.provider, settings.ollama?.base_url, loadOllamaModels]);
+
+  // Grok models come from xAI's /v1/models (via the sidecar, so the key never leaves this computer
+  // except to api.x.ai); without a key or on failure a static list is shown.
+  const loadXaiModels = useCallback((apiKey: string, delay = 600) => {
+    if (xaiFetchTimer.current) clearTimeout(xaiFetchTimer.current);
+    xaiFetchTimer.current = setTimeout(async () => {
+      setXaiFetching(true);
+      try {
+        const r = await fetchXaiModels(apiKey);
+        setXaiModels(r.models || []);
+        setXaiInfo({ source: r.source, message: r.message || "" });
+      } catch {
+        setXaiModels([]);
+        setXaiInfo(null);
+      } finally {
+        setXaiFetching(false);
+      }
+    }, delay);
+  }, []);
+
+  useEffect(() => {
+    if (settings.provider === "xai") loadXaiModels(settings.xai?.api_key || "");
+  }, [settings.provider, settings.xai?.api_key, loadXaiModels]);
 
   useEffect(() => {
     if (settings.provider !== "openrouter" || openrouterModels.length > 0) return;
@@ -199,6 +233,12 @@ export default function LLMSettingsForm({ onSaved, compact }: LLMSettingsFormPro
     immediateSave(ns);
   };
 
+  const updateXai = (field: string, value: string) => {
+    const ns = { ...settings, xai: { ...(settings.xai || { api_key: "", model: XAI_DEFAULT_MODEL }), [field]: value } };
+    setSettings(ns);
+    if (field === "model") immediateSave(ns); else autoSave(ns);
+  };
+
   const updateOpenAI = (field: string, value: string) => {
     const ns = { ...settings, openai: { ...settings.openai!, [field]: value } };
     setSettings(ns);
@@ -259,7 +299,7 @@ export default function LLMSettingsForm({ onSaved, compact }: LLMSettingsFormPro
   return (
     <div className="space-y-4">
       {/* API Key Guide — OpenAI & Anthropic only */}
-      {(settings.provider === "openai" || settings.provider === "anthropic" || settings.provider === "openrouter") && (
+      {(settings.provider === "xai" || settings.provider === "openai" || settings.provider === "anthropic" || settings.provider === "openrouter") && (
         <div className="rounded-2xl border border-border overflow-hidden">
           <button
             onClick={() => setShowGuide(!showGuide)}
@@ -273,7 +313,35 @@ export default function LLMSettingsForm({ onSaved, compact }: LLMSettingsFormPro
 
           {showGuide && (
             <div className="px-4 pb-4 border-t border-border pt-3">
-              {settings.provider === "openai" ? (
+              {settings.provider === "xai" ? (
+                <div className="space-y-4">
+                  <div className="space-y-2.5">
+                    {[
+                      { step: 1, text: t("guide.xai.step1"), link: "https://console.x.ai", linkText: t("guide.xai.step1Link") },
+                      { step: 2, text: t("guide.xai.step2") },
+                      { step: 3, text: t("guide.xai.step3") },
+                      { step: 4, text: t("guide.xai.step4") },
+                    ].map(({ step, text, link, linkText }) => (
+                      <div key={step} className="flex gap-3">
+                        <div className="w-6 h-6 rounded-full bg-secondary flex items-center justify-center flex-shrink-0 mt-0.5">
+                          <span className="text-xs font-bold text-foreground">{step}</span>
+                        </div>
+                        <div className="text-[13px] text-foreground leading-relaxed">
+                          {text}
+                          {link && (
+                            <a href={link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary font-semibold hover:underline ml-1">
+                              {linkText} <ExternalLink className="w-3 h-3" />
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="bg-[#F7F7F7] rounded-xl p-3 text-[12px] text-muted-foreground">
+                    <strong className="text-foreground">{t("guide.note")}</strong> {t("guide.xai.note")}
+                  </div>
+                </div>
+              ) : settings.provider === "openai" ? (
                 <div className="space-y-4">
                   <div className="space-y-2.5">
                     {[
@@ -384,6 +452,46 @@ export default function LLMSettingsForm({ onSaved, compact }: LLMSettingsFormPro
       {/* Provider Config */}
       <div className={compact ? "" : "card"}>
         {!compact && <h3 className="text-sm font-bold text-foreground mb-4">{t("configuration", { provider: PROVIDER_DISPLAY_NAMES[settings.provider] })}</h3>}
+
+        {settings.provider === "xai" && (() => {
+          const current = settings.xai?.model || XAI_DEFAULT_MODEL;
+          const list = xaiModels.length > 0 ? xaiModels : XAI_FALLBACK_MODELS;
+          const options = list.includes(current) ? list : [current, ...list];
+          return (
+            <div className="space-y-3" data-testid="xai-config">
+              <div>
+                <label htmlFor="xai-api-key" className="block text-sm font-semibold text-foreground mb-1.5">{t("xai.keyLabel")}</label>
+                <input id="xai-api-key" type="password" autoComplete="off" value={settings.xai?.api_key || ""}
+                  onChange={(e) => updateXai("api_key", e.target.value)} placeholder="xai-..." className="input-base font-mono" />
+                <p className="text-xs text-muted-foreground mt-1">
+                  {t("xai.keyHint")}{" "}
+                  <a href="https://console.x.ai" target="_blank" rel="noopener noreferrer" className="text-primary font-semibold hover:underline">console.x.ai</a>
+                </p>
+              </div>
+              <div>
+                <label htmlFor="xai-model" className="block text-sm font-semibold text-foreground mb-1.5">
+                  {t("xai.modelLabel")}
+                  {xaiFetching && <Loader2 className="w-3 h-3 animate-spin inline ml-2" />}
+                </label>
+                <div className="flex gap-2">
+                  <select id="xai-model" value={current} onChange={(e) => updateXai("model", e.target.value)} className="input-base flex-1">
+                    {options.map((m) => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                  <button type="button" className="btn-secondary" disabled={xaiFetching}
+                    onClick={() => loadXaiModels(settings.xai?.api_key || "", 0)} aria-label={t("xai.refreshModels")}>
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1" data-testid="xai-models-source">
+                  {xaiInfo?.source === "api"
+                    ? t("xai.modelsFromApi", { count: xaiModels.length })
+                    : t("xai.modelsFallback")}
+                  {xaiInfo?.source !== "api" && xaiInfo?.message ? ` ${xaiInfo.message}` : ""}
+                </p>
+              </div>
+            </div>
+          );
+        })()}
 
         {settings.provider === "openai" && (
           <div className="space-y-3">

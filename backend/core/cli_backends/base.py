@@ -46,6 +46,9 @@ class CliSpec:
     runnable: bool = True
     notes: str = ""
     login_methods: tuple[str, ...] = field(default_factory=tuple)
+    # Copyable setup steps shown in Settings: (label, shell command) pairs.
+    install_steps: tuple[tuple[str, str], ...] = ()
+    login_steps: tuple[tuple[str, str], ...] = ()
 
 
 def strip_ansi(text: str) -> str:

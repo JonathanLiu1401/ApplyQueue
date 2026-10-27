@@ -4,8 +4,12 @@
   "selectProvider": "Aanbieder selecteren",
   "configuration": "{{provider}}-configuratie",
   "providers": {
+    "xai": {
+      "name": "xAI Grok (Aanbevolen)",
+      "description": "Grok 4.x-modellen met beeldherkenning en tools via een xAI API-sleutel"
+    },
     "openrouter": {
-      "name": "OpenRouter (Aanbevolen)",
+      "name": "OpenRouter",
       "description": "100+ vision-modellen (GPT, Claude, Gemini, Qwen, Llama) via één API-sleutel"
     },
     "openai": {
@@ -72,7 +76,15 @@
       "step4": "Kopieer de sleutel en plak hem hieronder. Hij begint met sk-or-v1-.",
       "note": "OpenRouter geeft toegang tot 100+ modellen met één sleutel. Voeg credits toe op openrouter.ai/credits. Prijzen variëren per model."
     },
-    "note": "Opmerking:"
+    "note": "Opmerking:",
+    "xai": {
+      "step1": "Ga naar de xAI-console en log in met je X- of xAI-account.",
+      "step1Link": "console.x.ai",
+      "step2": "Open API Keys en klik op \"Create API key\".",
+      "step3": "Voeg tegoed of een betaalmethode toe onder Billing als je team die nog niet heeft.",
+      "step4": "Kopieer de sleutel en plak hem hieronder. Hij begint met xai-.",
+      "note": "De xAI-API wordt los van SuperGrok of X Premium gefactureerd. Wil je een Grok-abonnement gebruiken, zie dan \"Use your AI subscription\" hieronder."
+    }
   },
   "ollama": {
     "serverUrlHint": "De URL waar je Ollama-server draait.",
@@ -93,5 +105,13 @@
     "testConnection": "Verbinding testen",
     "connectionSuccessful": "Verbinding geslaagd!",
     "connectionFailed": "Verbinding mislukt."
+  },
+  "xai": {
+    "keyLabel": "xAI API-sleutel",
+    "keyHint": "Je sleutel wordt alleen op deze computer bewaard. Verkrijg er een op",
+    "modelLabel": "Grok-model",
+    "refreshModels": "Grok-modellen vernieuwen",
+    "modelsFromApi": "{{count}} Grok-modellen beschikbaar voor deze sleutel.",
+    "modelsFallback": "Standaard Grok-modellen."
   }
 }

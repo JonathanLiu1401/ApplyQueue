@@ -4,8 +4,12 @@
   "selectProvider": "Selecionar provedor",
   "configuration": "Configuração {{provider}}",
   "providers": {
+    "xai": {
+      "name": "xAI Grok (Recomendado)",
+      "description": "Modelos Grok 4.x com visão e uso de ferramentas via chave de API da xAI"
+    },
     "openrouter": {
-      "name": "OpenRouter (Recomendado)",
+      "name": "OpenRouter",
       "description": "100+ modelos de visão (GPT, Claude, Gemini, Qwen, Llama) com uma única chave API"
     },
     "openai": {
@@ -72,7 +76,15 @@
       "step4": "Copie a chave e cole abaixo. Ela começa com sk-or-v1-.",
       "note": "OpenRouter dá acesso a 100+ modelos com uma única chave. Adicione créditos em openrouter.ai/credits. Os preços variam por modelo."
     },
-    "note": "Nota:"
+    "note": "Nota:",
+    "xai": {
+      "step1": "Acesse o console da xAI e entre com sua conta X ou xAI.",
+      "step1Link": "console.x.ai",
+      "step2": "Abra API Keys e clique em \"Create API key\".",
+      "step3": "Adicione créditos ou um método de pagamento em Billing se sua equipe não tiver.",
+      "step4": "Copie a chave e cole abaixo. Ela começa com xai-.",
+      "note": "A API da xAI é cobrada separadamente do SuperGrok ou X Premium. Para usar uma assinatura do Grok, veja \"Use your AI subscription\" abaixo."
+    }
   },
   "ollama": {
     "serverUrlHint": "A URL onde seu servidor Ollama está rodando.",
@@ -93,5 +105,13 @@
     "testConnection": "Testar conexão",
     "connectionSuccessful": "Conexão bem-sucedida!",
     "connectionFailed": "Conexão falhou."
+  },
+  "xai": {
+    "keyLabel": "Chave de API da xAI",
+    "keyHint": "Sua chave fica salva apenas neste computador. Obtenha uma em",
+    "modelLabel": "Modelo Grok",
+    "refreshModels": "Atualizar modelos Grok",
+    "modelsFromApi": "{{count}} modelos Grok disponíveis para esta chave.",
+    "modelsFallback": "Modelos Grok padrão."
   }
 }

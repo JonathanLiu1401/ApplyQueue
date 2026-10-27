@@ -1,7 +1,8 @@
 """Test-only: point the mail and GitHub clients at local mocks for the packaged-app e2e suite.
 
 A packaged sidecar cannot be monkeypatched, so the UI e2e suite sets
-APPLYQUEUE_E2E_MOCK_MAIL / APPLYQUEUE_E2E_MOCK_GITHUB to a mock server's base URL.
+APPLYQUEUE_E2E_MOCK_MAIL / APPLYQUEUE_E2E_MOCK_GITHUB / APPLYQUEUE_E2E_MOCK_XAI to a mock
+server's base URL.
 Only ``http://127.0.0.1:<port>`` is accepted, so the variables can never send OAuth codes,
 tokens or mail anywhere but a server on the same machine. A normal install never sets them.
 """
@@ -44,6 +45,11 @@ def apply() -> dict:
         github.WEB = gh
         github.API = gh
         done["github"] = gh
+    xai = _base("APPLYQUEUE_E2E_MOCK_XAI")
+    if xai:
+        from core import llm_factory
+        llm_factory.xai_base_url = lambda: xai + "/v1"
+        done["xai"] = xai
     if done:
         _log.warning("E2E mock endpoints active: %s", done)
     return done

@@ -25,17 +25,19 @@ llama.cpp, Hugging Face).
 
 ## Download
 
-Get the installer for your computer from the
-[Releases page](https://github.com/JonathanLiu1401/ApplyQueue/releases/latest). Pick **one** file:
+Download the installer for your computer (version 0.1.0). Pick **one** file:
 
-| Your computer | Download this file |
+| Your computer | Download |
 |---|---|
-| **Mac with Apple silicon** (M1, M2, M3, M4 or newer) | `ApplyQueue_<version>_aarch64.dmg` |
-| **Mac with an Intel chip** | `ApplyQueue_<version>_x64.dmg` |
-| **Windows 10 or 11** | `ApplyQueue_<version>_x64-setup.exe` (or the `.msi` if your workplace prefers MSI) |
-| **Linux, any distro** | `ApplyQueue_<version>_amd64.AppImage` |
-| **Ubuntu, Debian, Mint, Pop!_OS** | `ApplyQueue_<version>_amd64.deb` |
-| **Fedora, RHEL, openSUSE** | `ApplyQueue-<version>-1.x86_64.rpm` |
+| **Mac with Apple silicon** (M1, M2, M3, M4 or newer) | [ApplyQueue_0.1.0_aarch64.dmg](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.0/ApplyQueue_0.1.0_aarch64.dmg) |
+| **Mac with an Intel chip** | [ApplyQueue_0.1.0_x64.dmg](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.0/ApplyQueue_0.1.0_x64.dmg) |
+| **Windows 10 or 11** | [ApplyQueue_0.1.0_x64-setup.exe](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.0/ApplyQueue_0.1.0_x64-setup.exe) (or the [.msi](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.0/ApplyQueue_0.1.0_x64_en-US.msi) if your workplace prefers MSI) |
+| **Linux, any distro** | [ApplyQueue_0.1.0_amd64.AppImage](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.0/ApplyQueue_0.1.0_amd64.AppImage) |
+| **Ubuntu, Debian, Mint, Pop!_OS** | [ApplyQueue_0.1.0_amd64.deb](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.0/ApplyQueue_0.1.0_amd64.deb) |
+| **Fedora, RHEL, openSUSE** | [ApplyQueue-0.1.0-1.x86_64.rpm](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.0/ApplyQueue-0.1.0-1.x86_64.rpm) |
+
+Checksums: [SHA256SUMS.txt](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.0/SHA256SUMS.txt). Newer versions will appear on the
+[Releases page](https://github.com/JonathanLiu1401/ApplyQueue/releases/latest).
 
 Not sure which Mac you have? Click the Apple menu, then **About This Mac**. If it says **Chip:
 Apple M…**, take the Apple silicon file. If it says **Processor: Intel**, take the Intel file.

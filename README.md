@@ -9,7 +9,7 @@
 > Playwright. Thank you to the LangHire authors; see [LICENSE](LICENSE) and the upstream
 > README kept at [docs/LANGHIRE_README.md](docs/LANGHIRE_README.md).
 
-> **Status: alpha (v0.1.0 draft).** The source is public; installers are built by GitHub Actions
+> **Status: alpha (v0.1.1).** The source is public; installers are built by GitHub Actions
 > and are **unsigned** (macOS Gatekeeper and Windows SmartScreen will warn; see Download below).
 >
 > **Tested platforms:** Linux x86_64 (self-hosted CI on every push), plus **GitHub-hosted VMs**
@@ -25,18 +25,18 @@ llama.cpp, Hugging Face).
 
 ## Download
 
-Download the installer for your computer (version 0.1.0). Pick **one** file:
+Download the installer for your computer (version 0.1.1). Pick **one** file:
 
 | Your computer | Download |
 |---|---|
-| **Mac with Apple silicon** (M1, M2, M3, M4 or newer) | [ApplyQueue_0.1.0_aarch64.dmg](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.0/ApplyQueue_0.1.0_aarch64.dmg) |
-| **Mac with an Intel chip** | [ApplyQueue_0.1.0_x64.dmg](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.0/ApplyQueue_0.1.0_x64.dmg) |
-| **Windows 10 or 11** | [ApplyQueue_0.1.0_x64-setup.exe](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.0/ApplyQueue_0.1.0_x64-setup.exe) (or the [.msi](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.0/ApplyQueue_0.1.0_x64_en-US.msi) if your workplace prefers MSI) |
-| **Linux, any distro** | [ApplyQueue_0.1.0_amd64.AppImage](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.0/ApplyQueue_0.1.0_amd64.AppImage) |
-| **Ubuntu, Debian, Mint, Pop!_OS** | [ApplyQueue_0.1.0_amd64.deb](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.0/ApplyQueue_0.1.0_amd64.deb) |
-| **Fedora, RHEL, openSUSE** | [ApplyQueue-0.1.0-1.x86_64.rpm](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.0/ApplyQueue-0.1.0-1.x86_64.rpm) |
+| **Mac with Apple silicon** (M1, M2, M3, M4 or newer) | [ApplyQueue_0.1.1_aarch64.dmg](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.1/ApplyQueue_0.1.1_aarch64.dmg) |
+| **Mac with an Intel chip** | [ApplyQueue_0.1.1_x64.dmg](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.1/ApplyQueue_0.1.1_x64.dmg) |
+| **Windows 10 or 11** | [ApplyQueue_0.1.1_x64-setup.exe](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.1/ApplyQueue_0.1.1_x64-setup.exe) (or the [.msi](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.1/ApplyQueue_0.1.1_x64_en-US.msi) if your workplace prefers MSI) |
+| **Linux, any distro** | [ApplyQueue_0.1.1_amd64.AppImage](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.1/ApplyQueue_0.1.1_amd64.AppImage) |
+| **Ubuntu, Debian, Mint, Pop!_OS** | [ApplyQueue_0.1.1_amd64.deb](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.1/ApplyQueue_0.1.1_amd64.deb) |
+| **Fedora, RHEL, openSUSE** | [ApplyQueue-0.1.1-1.x86_64.rpm](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.1/ApplyQueue-0.1.1-1.x86_64.rpm) |
 
-Checksums: [SHA256SUMS.txt](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.0/SHA256SUMS.txt). Newer versions will appear on the
+Checksums: [SHA256SUMS.txt](https://github.com/JonathanLiu1401/ApplyQueue/releases/download/v0.1.1/SHA256SUMS.txt). Newer versions will appear on the
 [Releases page](https://github.com/JonathanLiu1401/ApplyQueue/releases/latest).
 
 Not sure which Mac you have? Click the Apple menu, then **About This Mac**. If it says **Chip:

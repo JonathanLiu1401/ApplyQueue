@@ -23,6 +23,9 @@
 OpenRouter, OpenAI-compatible) · **local models with no subscription** (Ollama, LM Studio,
 llama.cpp, Hugging Face).
 
+> **Prefer a team of Grok Bot agents over a desktop app?** See
+> [grokbot/SETUP.md](grokbot/SETUP.md) for the captain + apply/search agent setup.
+
 ## Download
 
 Download the installer for your computer (version 0.1.1). Pick **one** file:
@@ -99,6 +102,9 @@ Small models make more mistakes, so start in review-first mode. See
 
 ## Docs
 
+- [grokbot/SETUP.md](grokbot/SETUP.md): run a multi-agent job-application team with Grok Bot
+  (one captain, apply and search agents, group chats, routines). Another Grok Bot can follow it on
+  its own; templates in [grokbot/templates/](grokbot/templates/).
 - [docs/PLAN.md](docs/PLAN.md): fork audit, subscription-CLI integration, vendor terms, milestones.
 - [docs/applyqueue/DESIGN.md](docs/applyqueue/DESIGN.md): original product design (written for an
   Electron prototype, archived on branch `archive/electron-scaffold`; stack sections superseded by PLAN.md).
